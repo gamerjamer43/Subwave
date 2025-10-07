@@ -9,5 +9,5 @@ pub struct Song {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cover: Option<Vec<u8>>,
     pub duration: i16,
-    pub file_path: String,
+    pub filename: String,
 }

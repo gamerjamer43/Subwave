@@ -41,7 +41,7 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
     // build the pattern and search
     let search_pattern = format!("%{}%", search_term);
     let rows = sqlx::query(
-        "SELECT id, name, artist, album, duration, file_path FROM songs 
+        "SELECT id, name, artist, album, duration, filename FROM songs 
          WHERE name LIKE ? OR artist LIKE ? OR album LIKE ?
          LIMIT 50"
     ).bind(&search_pattern)
@@ -59,7 +59,7 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
         album: row.get("album"),
         cover: None, // don't send cover in list view
         duration: row.get("duration"),
-        file_path: row.get("file_path"),
+        filename: row.get("filename"),
     }).collect();
     
     // serde serializes this shit

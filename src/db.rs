@@ -13,7 +13,7 @@ pub async fn init(pool: &SqlitePool) -> Result<()> {
             album TEXT NOT NULL,
             cover BLOB,
             duration INTEGER NOT NULL,
-            file_path TEXT NOT NULL UNIQUE
+            filename TEXT NOT NULL UNIQUE
         )
         "#,
     ).execute(pool)

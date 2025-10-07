@@ -19,8 +19,8 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     }
 
     // build the full file path and try to open
-    let file_path = format!("./static/{}", path);
-    let file = fs::File::open(&file_path).await
+    let path = format!("./static/{}", path);
+    let file = fs::File::open(&path).await
               .map_err(|_| StatusCode::NOT_FOUND)?;
     
     // get dat metadata

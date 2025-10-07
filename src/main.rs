@@ -10,7 +10,7 @@ mod server;
 use cors::{add_cors_headers, cors_preflight};
 
 // stdlib
-use std::{convert::Infallible, net::SocketAddr, time::Instant};
+use std::{convert::Infallible, net::SocketAddr, path::Path, time::Instant};
 
 // sqlx for sqlite shit
 use sqlx::{Pool, Sqlite, // types
@@ -25,9 +25,15 @@ use hyper::{Body, Request, Response, Server, StatusCode, // important shit
 #[tokio::main]
 async fn main() {
     // setup database
-    fs::create_dir_all("./data").await.expect("Failed to create data directory");
+    fs::create_dir_all("./data").await.expect("Failed to create ./data, where the db file is stored.");
+
+    // if db file doesn't exist make it
+    if !Path::new("./data/music.db").exists() {
+        fs::File::create("./data/music.db").await.expect("Failed to create the ./data/music.db file.");
+    }
     
     // create a pool for da db
+    // TODO: make it create music.db if it's not there im just lazy
     let pool: Pool<Sqlite> = SqlitePool::connect("sqlite:./data/music.db")
                              .await.expect("Failed to connect to database");
 

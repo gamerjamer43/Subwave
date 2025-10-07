@@ -35,15 +35,15 @@ pub async fn scan(pool: &SqlitePool, folder: &str) -> Result<()> {
 
 // index helper for dbing
 async fn index(pool: &SqlitePool, path: &Path) -> Result<()> {
-    // build the file_path from stored
-    let file_path = format!("/static/{}", path.file_name().unwrap().to_string_lossy());
+    // build the filename from stored
+    let filename = format!("{}", path.file_name().unwrap().to_string_lossy());
 
     // skip reindexing
-    if let Some(_) = sqlx::query("SELECT 1 FROM songs WHERE file_path = ?")
-     .bind(&file_path)
+    if let Some(_) = sqlx::query("SELECT 1 FROM songs WHERE filename = ?")
+     .bind(&filename)
      .fetch_optional(pool)
      .await? {
-        println!("Skipping already indexed: {}", file_path);
+        println!("Skipping already indexed: {}", filename);
         return Ok(());
     }
 
@@ -63,13 +63,13 @@ async fn index(pool: &SqlitePool, path: &Path) -> Result<()> {
     
     // add everything to a query
     sqlx::query(
-        "INSERT OR REPLACE INTO songs (name, artist, album, cover, duration, file_path) VALUES (?, ?, ?, ?, ?, ?)"
+        "INSERT OR REPLACE INTO songs (name, artist, album, cover, duration, filename) VALUES (?, ?, ?, ?, ?, ?)"
     ).bind(&name)
      .bind(&artist)
      .bind(&album)
      .bind(&cover)
      .bind(duration)
-     .bind(&file_path)
+     .bind(&filename)
      .execute(pool)
      .await?;
     
