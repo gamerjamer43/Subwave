@@ -1,0 +1,6 @@
+# compiled binaries
+/target
+
+# MY SONGS!!!! ALL MINE!!!!!!! (ensure you make a static and data folder)
+static/
+data/
