@@ -8,12 +8,12 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
 
-    // strip /file/ prefix from the path
+    // strip /file/ prefix from the path, index.html if none (which i havent added)
+    // TODO: add escaping so we can't jack the db
     let path = req.uri().path().trim_start_matches("/file/");
-    // default to index.html if empty
     let path = if path.is_empty() { "index.html" } else { path };
 
-    // prevent directory traversal attacks
+    // prevent directory traversal
     if path.contains("..") {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -23,7 +23,7 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     let file = fs::File::open(&file_path).await
               .map_err(|_| StatusCode::NOT_FOUND)?;
     
-    // get file metadata
+    // get dat metadata
     let metadata = file.metadata().await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     

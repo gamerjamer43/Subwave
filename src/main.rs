@@ -1,9 +1,13 @@
 // my modules
-mod models;
-mod db;
-mod scanner;
 mod api;
+mod cors;
+mod db;
+mod models;
+mod scanner;
 mod server;
+
+// my cors imports cuz it's being fucky
+use cors::{add_cors_headers, cors_preflight};
 
 // stdlib
 use std::{convert::Infallible, net::SocketAddr, time::Instant};
@@ -39,8 +43,12 @@ async fn main() {
 
     // build a service from the handler (which we need to bind to)
     let service = make_service_fn(move |_| {
+        // copy pool
         let pool = pool.clone();
+
+        // make service enclosure
         async move {
+            // further service enclosure
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
                 // make a copy of the pool
                 let pool = pool.clone();
@@ -52,7 +60,13 @@ async fn main() {
                     
                     // resolve path
                     let path = req.uri().path();
-                    let resp = if path.starts_with("/api/") {
+                    
+                    // handle OPTIONS preflight requests
+                    if req.method() == hyper::Method::OPTIONS {
+                        return Ok::<_, Infallible>(cors_preflight());
+                    }
+                    
+                    let mut resp = if path.starts_with("/api/") {
                         println!("DEBUG: Routing to API");
                         match api::handle(req, pool).await {
                             Ok(r) => r,
@@ -76,6 +90,9 @@ async fn main() {
                             .body(Body::from("Not Found"))
                             .unwrap()
                     };
+
+                    // add CORS headers to response
+                    add_cors_headers(&mut resp);
 
                     // print how long that shit took
                     println!("{} - {:.2}ms", resp.status(), start.elapsed().as_secs_f64() * 1000.0);

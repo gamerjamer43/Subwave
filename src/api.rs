@@ -24,16 +24,18 @@ pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Bod
 
 // song search
 async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
-    let raw_query = req.uri().query().unwrap_or(""); // e.g., "q=4%3A44"
+    // the shit we need to escape
+    let raw_query = req.uri().query().unwrap_or("");
+
+    // build a query from this
+    // TODO: add escaping so we can't jack the db
     let search_term = raw_query
         .split('&')
         .find_map(|kv| kv.strip_prefix("q="))
         .unwrap_or("");  
 
-    // decode any percent-encoded characters
+    // decode any percent-encoded characters, trim quotes (we need a second borrow)
     let search_term = percent_decode_str(search_term).decode_utf8_lossy();
-
-    // trim quotes just in case
     let search_term = search_term.trim_matches('"').trim();
 
     // build the pattern and search
