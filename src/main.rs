@@ -49,67 +49,55 @@ async fn main() {
 
     // build a service from the handler (which we need to bind to)
     let service = make_service_fn(move |_| {
-        // copy pool
         let pool = pool.clone();
-
-        // make service enclosure
         async move {
-            // further service enclosure
-            Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
-                // make a copy of the pool
-                let pool = pool.clone();
-
-                // wrap with an async for... yk
-                async move {
-                    // time that hoe
-                    let start = Instant::now();
-                    
-                    // resolve path
-                    let path = req.uri().path();
-                    
-                    // handle OPTIONS preflight requests
-                    if req.method() == hyper::Method::OPTIONS {
-                        return Ok::<_, Infallible>(cors_preflight());
-                    }
-                    
-                    let mut resp = if path.starts_with("/api/") {
-                        println!("DEBUG: Routing to API");
-                        match api::handle(req, pool).await {
-                            Ok(r) => r,
-                            Err(e) => error(e),
-                        }
-                    }
-
-                    // thrashed for 20 min and i am late to discrete. it works tho.
-                    // i can't believe i'm so fuckin stupid.
-                    else if path.starts_with("/file/") {
-                        match server::serve(req).await {
-                            Ok(r) => r,
-                            Err(e) => error(e),
-                        }
-                    }
-
-                    // otherwise nope
-                    else {
-                        Response::builder()
-                            .status(404)
-                            .body(Body::from("Not Found"))
-                            .unwrap()
-                    };
-
-                    // add CORS headers to response
-                    add_cors_headers(&mut resp);
-
-                    // print how long that shit took
-                    println!("{} - {:.2}ms", resp.status(), start.elapsed().as_secs_f64() * 1000.0);
-                    Ok::<_, Infallible>(resp)
-                }
-            }))
+            Ok::<_, Infallible>(service_fn(move |req| handle_request(req, pool.clone())))
         }
     });
 
     // and now like i said above
     Server::bind(&addr).serve(service).await.unwrap();
+}
+
+// handle individual requests
+async fn handle_request(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, Infallible> {
+    // resolve path
+    let start = Instant::now();
+    let path = req.uri().path();
+    
+    // handle OPTIONS preflight requests
+    if req.method() == hyper::Method::OPTIONS {
+        return Ok(cors_preflight());
+    }
+    
+    // api searches go thru /api/
+    let mut resp = if path.starts_with("/api/") {
+        match api::handle(req, pool).await {
+            Ok(r) => r,
+            Err(e) => error(e),
+        }
+    }
+
+    // static files go thru /file/
+    else if path.starts_with("/file/") {
+        match server::serve(req).await {
+            Ok(r) => r,
+            Err(e) => error(e),
+        }
+    }
+
+    // otherwise 404 that shit if we don't have one
+    else {
+        Response::builder()
+            .status(404)
+            .body(Body::from("Not Found"))
+            .unwrap()
+    };
+
+    // add headers and print how long that shit took
+    add_cors_headers(&mut resp);
+    println!("{} - {:.2}ms", resp.status(), start.elapsed().as_secs_f64() * 1000.0);
+    Ok(resp)
 }
 
 // simple error handler
