@@ -3,26 +3,34 @@ use tokio::fs;
 use tokio_util::io::ReaderStream;
 
 pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
+    // only allow GET requests
     if req.method() != Method::GET {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
 
-    let path = req.uri().path().trim_start_matches('/');
+    // strip /file/ prefix from the path
+    let path = req.uri().path().trim_start_matches("/file/");
+    // default to index.html if empty
     let path = if path.is_empty() { "index.html" } else { path };
-    
+
+    // prevent directory traversal attacks
     if path.contains("..") {
         return Err(StatusCode::FORBIDDEN);
     }
 
+    // build the full file path and try to open
     let file_path = format!("./static/{}", path);
     let file = fs::File::open(&file_path).await
               .map_err(|_| StatusCode::NOT_FOUND)?;
     
+    // get file metadata
     let metadata = file.metadata().await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
+    // wrap file in a streaming body
     let body = Body::wrap_stream(ReaderStream::new(file));
     
+    // determine content type based on file extension
     let content_type = match path.rsplit('.').next() {
         Some("ogg") => "audio/ogg",
         Some("mp3") => "audio/mpeg",
@@ -34,6 +42,7 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
         _ => "application/octet-stream",
     };
     
+    // build and return the response
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         .header(header::CONTENT_LENGTH, metadata.len())

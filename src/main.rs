@@ -9,13 +9,13 @@ mod server;
 use std::{convert::Infallible, net::SocketAddr, time::Instant};
 
 // sqlx for sqlite shit
-use sqlx::SqlitePool;
+use sqlx::{Pool, Sqlite, // types
+           SqlitePool};  // driver
 
 // hyper, the main http server
-use hyper::{Body, Request, Response, Server, StatusCode, service::{make_service_fn, service_fn}};
-
-// tokio file helpers 
-use tokio::fs;
+use tokio::fs;                                           // one tokio helper
+use hyper::{Body, Request, Response, Server, StatusCode, // important shit
+            service::{make_service_fn, service_fn}};     // attatching said important shit (service handlers)
 
 // tokio is like flask, needs main (cuz of async runtime)
 #[tokio::main]
@@ -24,7 +24,7 @@ async fn main() {
     fs::create_dir_all("./data").await.expect("Failed to create data directory");
     
     // create a pool for da db
-    let pool = SqlitePool::connect("sqlite:./data/music.db")
+    let pool: Pool<Sqlite> = SqlitePool::connect("sqlite:./data/music.db")
                              .await.expect("Failed to connect to database");
 
     // and send it to the initializer
@@ -42,27 +42,41 @@ async fn main() {
         let pool = pool.clone();
         async move {
             Ok::<_, Infallible>(service_fn(move |req: Request<Body>| {
+                // make a copy of the pool
                 let pool = pool.clone();
+
+                // wrap with an async for... yk
                 async move {
+                    // time that hoe
                     let start = Instant::now();
                     
-                    // route api requests properly
-                    let resp = if req.uri().path().starts_with("/api/") {
+                    // resolve path
+                    let path = req.uri().path();
+                    let resp = if path.starts_with("/api/") {
+                        println!("DEBUG: Routing to API");
                         match api::handle(req, pool).await {
                             Ok(r) => r,
                             Err(e) => error(e),
                         }
-                    } 
-                    
-                    // otherwise try and serve normally
-                    // TODO: change this to /file
-                    else {
+                    }
+
+                    // thrashed for 20 min and i am late to discrete. it works tho.
+                    // i can't believe i'm so fuckin stupid.
+                    else if path.starts_with("/file/") {
                         match server::serve(req).await {
                             Ok(r) => r,
                             Err(e) => error(e),
                         }
+                    }
+
+                    // otherwise nope
+                    else {
+                        Response::builder()
+                            .status(404)
+                            .body(Body::from("Not Found"))
+                            .unwrap()
                     };
-                    
+
                     // print how long that shit took
                     println!("{} - {:.2}ms", resp.status(), start.elapsed().as_secs_f64() * 1000.0);
                     Ok::<_, Infallible>(resp)
