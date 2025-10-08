@@ -7,7 +7,7 @@ pub fn add_cors_headers(resp: &mut Response<Body>) {
     // for right now i'm just testing. note to future retard noah: THIS IS WHY YOUR SHITS WEIRD
     headers.insert(
         ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("http://localhost:8081")
+        HeaderValue::from_static("*")
     );
 
     // other actual ones we need

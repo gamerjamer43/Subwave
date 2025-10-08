@@ -44,7 +44,7 @@ async fn main() {
     scanner::scan(&pool, "./static").await.unwrap();
     
     // build a socket address, announce that we're listening on that
-    let addr = SocketAddr::from(([0, 0, 0, 0], 5000));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 6000));
     println!("Listening on http://{}", addr);
 
     // build a service from the handler (which we need to bind to)

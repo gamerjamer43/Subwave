@@ -32,13 +32,18 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     
     // determine content type based on file extension
     let content_type = match path.rsplit('.').next() {
+        // audio content
         Some("ogg") => "audio/ogg",
         Some("mp3") => "audio/mpeg",
         Some("flac") => "audio/flac",
         Some("wav") => "audio/wav",
+
+        // site content
         Some("html") => "text/html",
         Some("css") => "text/css",
         Some("js") => "application/javascript",
+
+        // otherwise a stream
         _ => "application/octet-stream",
     };
     
