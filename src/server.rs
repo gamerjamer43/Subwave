@@ -1,6 +1,8 @@
-use hyper::{Body, Request, Response, StatusCode, Method, header};
+// all for url and file related shit
 use tokio::fs;
 use tokio_util::io::ReaderStream;
+use hyper::{Body, Request, Response, StatusCode, Method, header};
+use percent_encoding::percent_decode_str;
 
 pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     // only allow GET requests
@@ -9,9 +11,12 @@ pub async fn serve(req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     }
 
     // strip /file/ prefix from the path, index.html if none (which i havent added)
-    // TODO: add escaping so we can't jack the db
-    let path = req.uri().path().trim_start_matches("/file/");
-    let path = if path.is_empty() { "index.html" } else { path };
+    // TODO: add escaping so we can't jack the db. idk if this is vulnerable or not but we'll look later
+    let path = percent_decode_str(req.uri().path().trim_start_matches("/file/"))
+                      .decode_utf8_lossy().to_string();
+
+    // safely borrow room for index.html as well as path
+    let path = if path.is_empty() { "index.html".to_string() } else { path };
 
     // prevent directory traversal
     if path.contains("..") {

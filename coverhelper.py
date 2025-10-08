@@ -5,7 +5,6 @@ from mutagen.mp3 import MP3
 from mutagen.id3._frames import APIC, TIT2, TPE1, TPE2, TALB, TDRC
 import os
 
-
 def make_picture(cover_data: bytes, mime_type: str) -> Picture:
     """make a Picture obj for flac/ogg cover art.
     
