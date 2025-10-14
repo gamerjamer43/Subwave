@@ -1,25 +1,29 @@
+// backend related shit
 use hyper::{Body, Request, Response, StatusCode, Method, header};
 use sqlx::{SqlitePool, Row};
 use percent_encoding::percent_decode_str;
+
+// da song model
 use crate::models::Song;
+
+// using this for auth tokens
+// use rand::{rand_core::TryRngCore, rngs::OsRng};
 
 // basic handler
 pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+    // we only do get methods here
     if req.method() != Method::GET {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
-    
+
+    // match path properly
     let path = req.uri().path();
-    
-    if path == "/api/search" {
-        return search(req, pool).await;
+    match path {
+        s if s.starts_with("/api/search") => return search(req, pool).await,
+        c if c.starts_with("/api/cover") => return cover(path, pool).await,
+        // t if t.starts_with("/api/test") => return test(path, pool).await,
+        _ => Err(StatusCode::NOT_FOUND),
     }
-    
-    if path.starts_with("/api/cover/") {
-        return cover(path, pool).await;
-    }
-    
-    Err(StatusCode::NOT_FOUND)
 }
 
 // song search
@@ -39,27 +43,21 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
     let search_term = search_term.trim_matches('"').trim();
 
     // build the pattern and search
-    let search_pattern = format!("%{}%", search_term);
-    let rows = sqlx::query(
-        "SELECT id, name, artist, album, duration, filename FROM songs 
-         WHERE name LIKE ? OR artist LIKE ? OR album LIKE ?
-         LIMIT 50"
-    ).bind(&search_pattern)
-     .bind(&search_pattern)
-     .bind(&search_pattern)
+    let pattern = &format!("%{}%", search_term);
+    let rows = sqlx::query_file!("queries/searchsong.sql", pattern, pattern, pattern)
      .fetch_all(&pool)
      .await
      .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
     // returned songs go here
     let songs: Vec<Song> = rows.iter().map(|row| Song {
-        id: row.get("id"),
-        name: row.get("name"),
-        artist: row.get("artist"),
-        album: row.get("album"),
+        id: row.id,
+        name: row.name.clone(),
+        artist: row.artist.clone(),
+        album: row.album.clone(),
         cover: None, // don't send cover in list view
-        duration: row.get("duration"),
-        filename: row.get("filename"),
+        duration: row.duration as i16,
+        filename: row.filename.clone(),
     }).collect();
     
     // serde serializes this shit
@@ -81,13 +79,13 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
         .parse()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     
-    // search for one cover
-    let row = sqlx::query("SELECT cover FROM songs WHERE id = ?")
+    // search for one cover: albums store the cover, join via album_id
+    let row = sqlx::query("SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
-    
+
     // get that cover
     let cover: Option<Vec<u8>> = row.get("cover");
     if let Some(data) = cover {
@@ -96,7 +94,20 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
             .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
             .body(Body::from(data))
             .unwrap());
-    } else {
+    } 
+    
+    // proper error handling
+    else {
         return Err(StatusCode::NOT_FOUND);
     }
 }
+
+/*  will be using this for login auth
+fn _test(_path: &str, _pool: SqlitePool) -> String {
+    // gen 32 random bytes
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+
+    // encode and return
+    hex::encode(bytes) 
+*/

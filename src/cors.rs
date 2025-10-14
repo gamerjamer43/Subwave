@@ -1,13 +1,13 @@
 use hyper::{Response, Body, header::{HeaderValue, ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_HEADERS}};
 
-// add CORS headers to any response
+// any response gets these headers
 pub fn add_cors_headers(resp: &mut Response<Body>) {
     let headers = resp.headers_mut();
 
     // for right now i'm just testing. note to future retard noah: THIS IS WHY YOUR SHITS WEIRD
     headers.insert(
         ACCESS_CONTROL_ALLOW_ORIGIN,
-        HeaderValue::from_static("*")
+        HeaderValue::from_static("*") // THIS SPECIFICALLY
     );
 
     // other actual ones we need

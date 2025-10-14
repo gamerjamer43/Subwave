@@ -61,17 +61,38 @@ async fn index(pool: &SqlitePool, path: &Path) -> Result<()> {
     let cover = tag.and_then(|t| t.pictures().first().map(|p| p.data().to_vec()));
     let duration = tagged_file.properties().duration().as_secs() as i16;
     
-    // add everything to a query
+    // create albums
     sqlx::query(
-        "INSERT OR REPLACE INTO songs (name, artist, album, cover, duration, filename) VALUES (?, ?, ?, ?, ?, ?)"
-    ).bind(&name)
-     .bind(&artist)
-     .bind(&album)
-     .bind(&cover)
-     .bind(duration)
-     .bind(&filename)
-     .execute(pool)
-     .await?;
+        "INSERT OR IGNORE INTO albums (name, artist, cover, runtime, songcount)
+        VALUES (?, ?, ?, 0, 0);"
+    )
+    .bind(&album)
+    .bind(&artist)
+    .bind(&cover)
+    .execute(pool)
+    .await?;
+
+    // album ids
+    let album_id: i64 = sqlx::query_scalar(
+        "SELECT id FROM albums WHERE name = ? AND artist = ?;"
+    )
+    .bind(&album)
+    .bind(&artist)
+    .fetch_one(pool)
+    .await?;
+
+    // ts so fucked. track number is a placeholder zero if not found
+    sqlx::query(
+        "INSERT OR REPLACE INTO songs (name, album_id, track_number, duration, filename)
+        VALUES (?, ?, ?, ?, ?);"
+    )
+    .bind(&name)
+    .bind(album_id)
+    .bind(0_i32) // placeholder track number when none is available
+    .bind(duration)
+    .bind(&filename)
+    .execute(pool)
+    .await?;
     
     println!("Indexed: {} - {} ({})", artist, name, album);
     Ok(())

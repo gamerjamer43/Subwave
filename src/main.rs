@@ -10,7 +10,7 @@ mod server;
 use cors::{add_cors_headers, cors_preflight};
 
 // stdlib
-use std::{convert::Infallible, net::SocketAddr, path::Path, time::Instant};
+use std::{convert::Infallible, net::SocketAddr, fs::File, time::Instant};
 
 // sqlx for sqlite shit
 use sqlx::{Pool, Sqlite, // types
@@ -27,29 +27,36 @@ use hyper::server::conn::AddrStream;
 // tokio is like flask, needs main (cuz of async runtime)
 #[tokio::main]
 async fn main() {
-    // setup database, scanner, other bullshit
-    fs::create_dir_all("./data").await.expect("Failed to create ./data, where the db file is stored.");
-    if !Path::new("./data/music.db").exists() {
-        fs::File::create("./data/music.db").await.expect("Failed to create the ./data/music.db file.");
+    // ensure the directory exists
+    fs::create_dir_all("./data")
+        .await
+        .expect("Failed to create ./data, where the db file is stored.");
+
+    // create db if it doesn't exist
+    let db_path = "./data/music.db";
+    if !std::path::Path::new(db_path).exists() {
+        File::create(db_path)
+            .expect("Failed to create database file");
+        println!("Created database file at {}", db_path);
     }
 
-    // open pool and connect
-    let pool: Pool<Sqlite> = SqlitePool::connect("sqlite:./data/music.db")
-                             .await.expect("Failed to connect to database");
-    db::init(&pool).await.unwrap();
+    // open pool and connect (SQLite creates the file if missing)
+    let pool: Pool<Sqlite> = SqlitePool::connect("sqlite://./data/music.db")
+        .await
+        .expect("Failed to connect to database");
 
-    // load all files into the db
-    scanner::scan(&pool, "./static").await.unwrap();
+    // initialize database tables
+    db::init(&pool).await.expect("DB initialization failed");
 
-    // socket address bullshit
+    // scan and index music files
+    scanner::scan(&pool, "./static").await.expect("Failed to scan music files");
+
+    // bind server
     let addr = SocketAddr::from(([0, 0, 0, 0], 6000));
     println!("Listening on http://{}", addr);
 
-    // log client IP on new connection
     let service = make_service_fn(move |conn: &AddrStream| {
         let pool = pool.clone();
-
-        // fix this. as it's just local for rn. may be b/c of the tunnel
         let remote_addr = conn.remote_addr();
         println!("New connection from {}", remote_addr);
 
