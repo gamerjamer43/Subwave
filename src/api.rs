@@ -5,23 +5,47 @@ use percent_encoding::percent_decode_str;
 
 // da song model
 use crate::models::Song;
-
-// using this for auth tokens
-// use rand::{rand_core::TryRngCore, rngs::OsRng};
+use crate::login::{signup, login, AuthRequest};
 
 // basic handler
 pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
-    // we only do get methods here
+    let path = req.uri().path();
+
+    // POST routes for authentication ONLY
+    match (req.method(), path) {
+        (&Method::POST, "/api/signup") => {
+            let body_bytes = hyper::body::to_bytes(req.into_body())
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            
+            let auth_req: AuthRequest = serde_json::from_slice(&body_bytes)
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            
+            return signup(pool, auth_req).await;
+        }
+
+        (&Method::POST, "/api/login") => {
+            let body_bytes = hyper::body::to_bytes(req.into_body())
+                .await
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            
+            let auth_req: AuthRequest = serde_json::from_slice(&body_bytes)
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            
+            return login(pool, auth_req).await;
+        }
+        _ => {}
+    }
+
+    // we only do get methods otherwise
     if req.method() != Method::GET {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
     }
 
     // match path properly
-    let path = req.uri().path();
     match path {
         s if s.starts_with("/api/search") => return search(req, pool).await,
         c if c.starts_with("/api/cover") => return cover(path, pool).await,
-        // t if t.starts_with("/api/test") => return test(path, pool).await,
         _ => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -101,13 +125,3 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
         return Err(StatusCode::NOT_FOUND);
     }
 }
-
-/*  will be using this for login auth
-fn _test(_path: &str, _pool: SqlitePool) -> String {
-    // gen 32 random bytes
-    let mut bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut bytes);
-
-    // encode and return
-    hex::encode(bytes) 
-*/

@@ -2,6 +2,7 @@
 mod api;
 mod cors;
 mod db;
+mod login;
 mod models;
 mod scanner;
 mod server;
