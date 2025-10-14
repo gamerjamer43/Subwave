@@ -16,3 +16,18 @@ pub struct Song {
     pub duration: i16,
     pub filename: String,
 }
+
+
+#[derive(serde::Serialize)]
+pub struct Album {
+    pub id: i64,
+    
+    // album info
+    pub name: String,
+    pub artist: String,
+    pub runtime: i64,
+    pub songcount: i64,
+
+    // ref to each song
+    pub songs: Vec<Song>,
+}

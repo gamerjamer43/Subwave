@@ -4,7 +4,7 @@ use sqlx::{SqlitePool, Row};
 use percent_encoding::percent_decode_str;
 
 // da song model
-use crate::models::Song;
+use crate::models::{Song, Album};
 use crate::login::{signup, login, AuthRequest};
 
 // basic handler
@@ -124,4 +124,70 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
     else {
         return Err(StatusCode::NOT_FOUND);
     }
+}
+
+// album search
+async fn _album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+    // album id (yoinked frm above)
+    let album_id: i64 = path.trim_start_matches("/api/album/")
+        .parse()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+
+    // album metadata
+    let row = sqlx::query("SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = ?")
+        .bind(album_id)
+        .fetch_one(&pool)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
+
+    let album_name: String = row.get("name");
+    let album_artist: String = row.get("artist");
+    let album_runtime: i64 = row.get("runtime");
+    let album_songcount: i64 = row.get("songcount");
+
+    // fetch all songs in said album. this ones getting fat so i may move it
+    let rows = sqlx::query("SELECT s.id, s.name, s.duration, s.filename, a.name as album, a.artist as artist FROM songs s JOIN albums a ON s.album_id = a.id WHERE a.id = ? ORDER BY s.track_number ASC")
+        .bind(album_id)
+        .fetch_all(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let songs: Vec<Song> = rows.iter().map(|row| {
+        // fat blob of info
+        let id: i64 = row.get("id");
+        let name: String = row.get("name");
+        let artist: String = row.get("artist");
+        let album: String = row.get("album");
+        let duration_i64: i64 = row.get("duration");
+        let filename: String = row.get("filename");
+
+        // thanks serde!!!!
+        Song {
+            id,
+            name,
+            artist,
+            album,
+            cover: None,
+            duration: duration_i64 as i16,
+            filename,
+        }
+    }).collect();
+    
+    // build a response w the info
+    let resp = Album {
+        id: album_id,
+        name: album_name,
+        artist: album_artist,
+        runtime: album_runtime,
+        songcount: album_songcount,
+        songs,
+    };
+
+    let json = serde_json::to_string(&resp).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .body(Body::from(json))
+        .unwrap())
 }
