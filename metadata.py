@@ -6,7 +6,8 @@ from mutagen.id3._frames import APIC, TIT2, TPE1, TPE2, TALB, TDRC
 import os
 
 def make_picture(cover_data: bytes, mime_type: str) -> Picture:
-    """make a Picture obj for flac/ogg cover art.
+    """
+    make a Picture obj for flac/ogg cover art.
     
     Args:
         cover_data: raw image bytes
@@ -25,7 +26,8 @@ def make_picture(cover_data: bytes, mime_type: str) -> Picture:
 
 def add_id3_tags(audio, cover_data: bytes, mime_type: str, title: str, 
                  artists: str, contributing_artists: str, album: str, year: str) -> bool:
-    """add id3 tags to mp3/wav. exits if tags already exist.
+    """
+    add id3 tags to mp3/wav. exits if tags already exist.
     
     Args:
         audio: mutagen audio object (MP3 or WAVE)
@@ -65,7 +67,8 @@ def add_id3_tags(audio, cover_data: bytes, mime_type: str, title: str,
 
 def process_audio(audio_file: str, cover_file: str, title: str, artists: str, 
                   contributing_artists: str, album: str, year: str) -> bool:
-    """process audio file and add metadata + cover art.
+    """
+    process audio file and add metadata + cover art.
     
     Args:
         audio_file: path to audio file
@@ -135,7 +138,7 @@ def main() -> None:
         audio_file: str = input("audio file: ")
         cover_file: str = input("cover art: ")
         title: str = input("title: ")
-        artists : str= input("artists (comma-separated): ")
+        artists: str= input("artists (comma-separated): ")
         contributing_artists: str = input("contributing artists (blank = same as artists): ").strip()
         if not contributing_artists:
             contributing_artists = artists

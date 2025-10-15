@@ -41,5 +41,6 @@ CREATE TABLE IF NOT EXISTS playlists (
 
 CREATE TABLE IF NOT EXISTS sessions (
     username TEXT PRIMARY KEY,
-    token TEXT NOT NULL
+    token TEXT NOT NULL,
+    issued INTEGER NOT NULL
 );
