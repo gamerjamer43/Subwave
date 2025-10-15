@@ -5,4 +5,7 @@
 static/
 data/
 
+# test commands (they have my actual password in it so you don't need ts)
+testcmds.sh
+
 # MY ENV VAR (it not a big deal so i'm just pushing it enjoy)
