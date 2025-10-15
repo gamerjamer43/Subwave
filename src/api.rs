@@ -1,5 +1,6 @@
 // backend related shit
 use hyper::{Body, Request, Response, StatusCode, Method, header};
+use crate::login::verify;
 use sqlx::{SqlitePool, Row};
 use percent_encoding::percent_decode_str;
 
@@ -40,6 +41,14 @@ pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Bod
     // we only do get methods otherwise
     if req.method() != Method::GET {
         return Err(StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    // big fat guard clause
+    if let Err(status) = verify(&pool, &req).await {
+        return Ok(Response::builder()
+            .status(status)
+            .body(Body::from("unauthorized"))
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
     }
 
     // match path properly

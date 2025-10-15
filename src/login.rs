@@ -1,16 +1,42 @@
 use rand_core::{OsRng, RngCore};
-use hyper::{Body, Response, StatusCode};
+use hyper::{Body, Request, Response, StatusCode};
 use sqlx::{SqlitePool, Row};
-use serde::Deserialize;
-use argon2::{password_hash::{PasswordHash, SaltString}, Argon2, Params, PasswordHasher, PasswordVerifier};
+use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
+use chrono::{Utc, Duration};
+use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
+
+use argon2::{password_hash::{PasswordHash, SaltString}, Argon2, Params, PasswordHasher, PasswordVerifier, Algorithm, Version};
 
 #[derive(Deserialize)]
-#[allow(dead_code)]
-// tagging this with a dead code tag cuz i'm not actually doing logins yet, or even like storing the token... just sending it
 pub struct AuthRequest {
     username: String,
     password: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Claims {
+    sub: String,  // username
+    exp: usize,   // expiration time
+    iat: usize,   // issued at
+}
+
+// doing this w lazy evaluation so i only have to do this once. fuck you rust!!! you have brought me so much joy and so much pain
+static ARGON2: LazyLock<Argon2<'static>> = LazyLock::new(|| {
+    let params = Params::new(4096, 2, 2, None).expect("valid argon2 params");
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+});
+
+// jwt secret key - in production load from env var
+static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
+    std::env::var("JWT_SECRET")
+        .unwrap_or_else(|_| {
+            let mut secret = [0u8; 32];
+            OsRng.fill_bytes(&mut secret);
+            hex::encode(secret)
+        })
+        .into_bytes()
+});
 
 pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
     // check if the user already exists
@@ -27,12 +53,7 @@ pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>
 
     // salt n hash
     let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::new(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-        Params::new(4096, 2, 2, None).unwrap() // just set p=2
-    );
-    let password_hash = argon2.hash_password(req.password.as_bytes(), &salt)
+    let password_hash = ARGON2.hash_password(req.password.as_bytes(), &salt)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
 
@@ -68,39 +89,23 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // verify against the hash
-    let argon2 = Argon2::new(
-        argon2::Algorithm::Argon2id,
-        argon2::Version::V0x13,
-
-        // turn this into a constant
-        Params::new(4096, 1, 2, None).unwrap()
-    );
-    if argon2.verify_password(req.password.as_bytes(), &hash).is_err() {
+    if ARGON2.verify_password(req.password.as_bytes(), &hash).is_err() {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    // generate a random 32 byte session token
-    let mut token_bytes = [0u8; 32];
-    OsRng.fill_bytes(&mut token_bytes);
-    let token = hex::encode(token_bytes);
+    // generate jwt with 24 hour expiry
+    let now = Utc::now();
+    let claims = Claims {
+        sub: req.username.clone(),
+        exp: (now + Duration::hours(24)).timestamp() as usize,
+        iat: now.timestamp() as usize,
+    };
 
-    // salt n hash that too
-    let salt = SaltString::generate(&mut OsRng);
-    let token_hash = argon2.hash_password(token.as_bytes(), &salt)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .to_string();
-
-    // store in session table under the user
-    sqlx::query("
-        INSERT INTO sessions (username, token)
-        VALUES (?, ?)
-        ON CONFLICT(username) DO UPDATE SET token = excluded.token"
-    )
-      .bind(&req.username)
-      .bind(&token_hash)
-      .execute(&pool)
-      .await
-      .map_err(|_| StatusCode::UNAUTHORIZED)?;
+    let token = encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(&JWT_SECRET)
+    ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // send that jawn back
     Ok(Response::builder()
@@ -108,4 +113,36 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
         .header("Content-Type", "text/plain")
         .body(Body::from(token))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
+}
+
+pub async fn verify(pool: &SqlitePool, req: &Request<Body>) -> Result<(), StatusCode> {
+    // decode header
+    let auth = req
+        .headers()
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    // snag token from that shit
+    let token = auth
+        .strip_prefix("Bearer ")
+        .map(str::trim)
+        .ok_or(StatusCode::BAD_REQUEST)?;
+
+    // decode and verify jwt
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(&JWT_SECRET),
+        &Validation::default()
+    ).map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // jwt lib handles expiration check automatically, but we can verify user still exists if needed
+    let _row = sqlx::query("SELECT 1 FROM users WHERE username = ?")
+        .bind(&token_data.claims.sub)
+        .fetch_one(pool)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
+
+    // success — caller can proceed
+    Ok(())
 }
