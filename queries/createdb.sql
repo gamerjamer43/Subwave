@@ -23,10 +23,9 @@ CREATE TABLE IF NOT EXISTS albums (
 
     runtime INTEGER NOT NULL,
     songcount INTEGER NOT NULL
-
-    -- add a reference to each song here
 );
 
+-- user info
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL,
@@ -38,4 +37,9 @@ CREATE TABLE IF NOT EXISTS playlists (
     userId INTEGER NOT NULL,
     name TEXT NOT NULL,
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    username TEXT PRIMARY KEY,
+    token TEXT NOT NULL
 );

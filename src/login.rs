@@ -1,6 +1,6 @@
 use rand_core::{OsRng, RngCore};
 use hyper::{Body, Response, StatusCode};
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, Row};
 use serde::Deserialize;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::{SaltString, PasswordHash}};
 
@@ -36,13 +36,18 @@ pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>
 
 pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
     // fetch stored password hash
-    let row = sqlx::query!("SELECT password FROM users WHERE username = ?", req.username)
+    let row = sqlx::query("SELECT password FROM users WHERE username = ?")
+        .bind(&req.username)
         .fetch_one(&pool)
         .await
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     // properly parse hash
-    let hash = PasswordHash::new(&row.password)
+    let hash_str: String = row
+        .try_get("password")
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    let hash = PasswordHash::new(&hash_str)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // verify against the hash

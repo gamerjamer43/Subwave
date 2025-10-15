@@ -46,6 +46,7 @@ pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Bod
     match path {
         s if s.starts_with("/api/search") => return search(req, pool).await,
         c if c.starts_with("/api/cover") => return cover(path, pool).await,
+        a if a.starts_with("/api/album") => album(path, pool).await,
         _ => Err(StatusCode::NOT_FOUND),
     }
 }
@@ -68,21 +69,32 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
 
     // build the pattern and search
     let pattern = &format!("%{}%", search_term);
-    let rows = sqlx::query_file!("queries/searchsong.sql", pattern, pattern, pattern)
-     .fetch_all(&pool)
-     .await
-     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let sql = include_str!("../queries/searchsong.sql");
+
+    // run the query dynamically
+    let rows = sqlx::query(sql)
+        .bind(pattern)
+        .bind(pattern)
+        .bind(pattern)
+        .fetch_all(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
     // returned songs go here
-    let songs: Vec<Song> = rows.iter().map(|row| Song {
-        id: row.id,
-        name: row.name.clone(),
-        artist: row.artist.clone(),
-        album: row.album.clone(),
-        cover: None, // don't send cover in list view
-        duration: row.duration as i16,
-        filename: row.filename.clone(),
-    }).collect();
+    let songs: Vec<Song> = rows
+        .iter()
+        .map(|row| {
+            Song {
+                id: row.try_get::<i64, _>("id").unwrap_or(0) as u16,
+                name: row.try_get::<String, _>("name").unwrap_or_default(),
+                artist: row.try_get::<String, _>("artist").unwrap_or_default(),
+                album: row.try_get::<String, _>("album").unwrap_or_default(),
+                cover: None, // don't send cover in list view
+                duration: row.try_get::<i64, _>("duration").unwrap_or(0) as u16,
+                filename: row.try_get::<String, _>("filename").unwrap_or_default(),
+            }
+        })
+        .collect();
     
     // serde serializes this shit
     let json = serde_json::to_string(&songs)
@@ -127,9 +139,9 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
 }
 
 // album search
-async fn _album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+async fn album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
     // album id (yoinked frm above)
-    let album_id: i64 = path.trim_start_matches("/api/album/")
+    let album_id: u16 = path.trim_start_matches("/api/album/")
         .parse()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
@@ -142,8 +154,8 @@ async fn _album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCo
 
     let album_name: String = row.get("name");
     let album_artist: String = row.get("artist");
-    let album_runtime: i64 = row.get("runtime");
-    let album_songcount: i64 = row.get("songcount");
+    let album_runtime: u16 = row.get("runtime");
+    let album_songcount: u8 = row.get("songcount");
 
     // fetch all songs in said album. this ones getting fat so i may move it
     let rows = sqlx::query("SELECT s.id, s.name, s.duration, s.filename, a.name as album, a.artist as artist FROM songs s JOIN albums a ON s.album_id = a.id WHERE a.id = ? ORDER BY s.track_number ASC")
@@ -154,11 +166,11 @@ async fn _album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCo
 
     let songs: Vec<Song> = rows.iter().map(|row| {
         // fat blob of info
-        let id: i64 = row.get("id");
+        let id: u16 = row.get("id");
         let name: String = row.get("name");
         let artist: String = row.get("artist");
         let album: String = row.get("album");
-        let duration_i64: i64 = row.get("duration");
+        let duration: u16 = row.get("duration");
         let filename: String = row.get("filename");
 
         // thanks serde!!!!
@@ -168,11 +180,11 @@ async fn _album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCo
             artist,
             album,
             cover: None,
-            duration: duration_i64 as i16,
+            duration: duration,
             filename,
         }
     }).collect();
-    
+
     // build a response w the info
     let resp = Album {
         id: album_id,

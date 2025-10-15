@@ -59,7 +59,7 @@ async fn index(pool: &SqlitePool, path: &Path) -> Result<()> {
     let album = tag.and_then(|t| t.album().map(|s| s.to_string()))
                         .unwrap_or_else(|| "Unknown Album".to_string());
     let cover = tag.and_then(|t| t.pictures().first().map(|p| p.data().to_vec()));
-    let duration = tagged_file.properties().duration().as_secs() as i16;
+    let duration = tagged_file.properties().duration().as_secs() as i64;
     
     // create albums
     sqlx::query(
@@ -94,6 +94,16 @@ async fn index(pool: &SqlitePool, path: &Path) -> Result<()> {
     .execute(pool)
     .await?;
     
+    // incrementally update album counters to avoid expensive recalculation
+    // NOTE: this assumes each indexed file corresponds to one song row inserted
+    // and that duration is stored in seconds as INTEGER. Use a single UPDATE
+    // to atomically increment songcount and add to runtime.
+    sqlx::query("UPDATE albums SET songcount = songcount + 1, runtime = runtime + ? WHERE id = ?;")
+        .bind(duration)
+        .bind(album_id)
+        .execute(pool)
+        .await?;
+
     println!("Indexed: {} - {} ({})", artist, name, album);
     Ok(())
 }

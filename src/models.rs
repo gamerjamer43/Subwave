@@ -2,7 +2,7 @@ use serde::Serialize;
 
 #[derive(Serialize)]
 pub struct Song {
-    pub id: i64,
+    pub id: u16,
 
     // song info
     pub name: String,
@@ -13,20 +13,20 @@ pub struct Song {
     pub cover: Option<Vec<u8>>,
 
     // file info
-    pub duration: i16,
+    pub duration: u16,
     pub filename: String,
 }
 
 
 #[derive(serde::Serialize)]
 pub struct Album {
-    pub id: i64,
+    pub id: u16,
     
     // album info
     pub name: String,
     pub artist: String,
-    pub runtime: i64,
-    pub songcount: i64,
+    pub runtime: u16,
+    pub songcount: u8,
 
     // ref to each song
     pub songs: Vec<Song>,
