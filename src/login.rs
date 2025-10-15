@@ -74,7 +74,6 @@ pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>
 // still a big ass bottleneck in verification. we at 220 ms now with INSECURITY!!! magic numbers need to be removed too but this shit works so why not push
 pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
     // fetch stored password hash
-    println!("cum");
     let row = sqlx::query("SELECT password, id FROM users WHERE username = ?")
         .bind(&req.username)
         .fetch_one(&pool)
@@ -82,7 +81,6 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
         .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
     // idk why this is 2 lines... but whatever. im too tired
-    println!("piss");
     let hash_str: String = row.try_get("password")
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let hash = PasswordHash::new(&hash_str)
@@ -94,7 +92,6 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
     }
 
     // cool jwt token
-    println!("shat");
     let now = Utc::now().timestamp();
     let claims = Claims {
         sub: req.username.clone(),
@@ -103,7 +100,6 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
     };
 
     // encode for sending
-    println!("asdoas");
     let token = encode(
         &Header::default(),
         &claims,
@@ -111,7 +107,6 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // store session
-    println!("fart");
     sqlx::query("INSERT INTO sessions (username, token, issued) VALUES (?, ?, ?) 
                      ON CONFLICT(username) DO UPDATE SET token=excluded.token, issued=excluded.issued")
         .bind(&req.username)  // username
@@ -125,7 +120,6 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
         })?;
 
     // slide er on over private
-    println!("megeen");
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header("Content-Type", "application/json")
