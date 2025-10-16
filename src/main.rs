@@ -5,7 +5,6 @@ mod db;
 mod login;
 mod models;
 mod scanner;
-mod server;
 
 // my cors imports cuz it's being fucky
 use cors::{add_cors_headers, cors_preflight};
@@ -80,23 +79,15 @@ async fn handle_request(req: Request<Body>, pool: SqlitePool) -> Result<Response
         return Ok(cors_preflight());
     }
     
-    // api searches go thru /api/
-    let mut resp = if path.starts_with("/api/") {
+    // route to api
+    let mut resp = if path.starts_with("/api/") || path.starts_with("/file/") {
         match api::handle(req, pool).await {
             Ok(r) => r,
             Err(e) => error(e),
         }
     }
 
-    // static files go thru /file/
-    else if path.starts_with("/file/") {
-        match server::serve(req).await {
-            Ok(r) => r,
-            Err(e) => error(e),
-        }
-    }
-
-    // otherwise 404 that shit if we don't have one
+    // otherwise 404 that shit (will add other routes besides file serving and the api potentially)
     else {
         Response::builder()
             .status(404)

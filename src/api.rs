@@ -1,63 +1,105 @@
 // backend related shit
 use hyper::{Body, Request, Response, StatusCode, Method, header};
-use crate::login::verify;
+use tokio::fs;
+use tokio_util::io::ReaderStream;
 use sqlx::{SqlitePool, Row};
+
+// escaping searches
 use percent_encoding::percent_decode_str;
 
-// da song model
-use crate::models::{Song, Album};
-use crate::login::{signup, login, AuthRequest};
+// all necessary models
+use crate::models::{Song, Album, AuthRequest};
+
+// login helpers
+use crate::login::{signup, login, verify};
 
 // basic handler
 pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
-    let path = req.uri().path();
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
 
-    // POST routes for authentication ONLY
-    match (req.method(), path) {
-        (&Method::POST, "/api/signup") => {
-            let body_bytes = hyper::body::to_bytes(req.into_body())
-                .await
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            
-            let auth_req: AuthRequest = serde_json::from_slice(&body_bytes)
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            
-            return signup(pool, auth_req).await;
-        }
-
-        (&Method::POST, "/api/login") => {
-            let body_bytes = hyper::body::to_bytes(req.into_body())
-                .await
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            
-            let auth_req: AuthRequest = serde_json::from_slice(&body_bytes)
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            
-            return login(pool, auth_req).await;
-        }
-        _ => {}
+    // post is legit only used for auth. (may be used for uploading, but...) everything else is a get
+    if method == Method::POST && (path == "/api/signup" || path == "/api/login") {
+        let body = hyper::body::to_bytes(req.into_body()).await.map_err(|_| StatusCode::BAD_REQUEST)?;
+        let auth: AuthRequest = serde_json::from_slice(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+        return match path.as_str() {
+            "/api/signup" => signup(pool, auth).await,
+            "/api/login"  => login(pool, auth).await,
+            _ => unreachable!(),
+        };
     }
 
-    // we only do get methods otherwise
-    if req.method() != Method::GET {
-        return Err(StatusCode::METHOD_NOT_ALLOWED);
-    }
-
-    // big fat guard clause
+    // if it's not a get, and anything below this, L 405
     if let Err(status) = verify(&pool, &req).await {
         return Ok(Response::builder()
             .status(status)
             .body(Body::from("unauthorized"))
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?);
+            .map_err(|_| StatusCode::METHOD_NOT_ALLOWED)?);
     }
+    if method != Method::GET { return Err(StatusCode::METHOD_NOT_ALLOWED); }
 
-    // match path properly
-    match path {
-        s if s.starts_with("/api/search") => return search(req, pool).await,
-        c if c.starts_with("/api/cover") => return cover(path, pool).await,
-        a if a.starts_with("/api/album") => album(path, pool).await,
+    // router part 2 electric boogaloo, only for the actual api methods
+    match path.as_str() {
+        p if p.starts_with("/api/search") => search(req, pool.clone()).await,
+        p if p.starts_with("/api/cover")  => cover(p, pool.clone()).await,
+        p if p.starts_with("/api/album")  => album(p, pool.clone()).await,
+        p if p.starts_with("/file/") => serve(p, req).await,
         _ => Err(StatusCode::NOT_FOUND),
     }
+}
+
+// file service
+pub async fn serve(path: &str, _req: Request<Body>) -> Result<Response<Body>, StatusCode> {
+    // strip /file/ prefix from the path, index.html if none (which i havent added)
+    // TODO: add escaping so we can't jack the db. idk if this is vulnerable or not but we'll look later
+    let filepath = percent_decode_str(path.trim_start_matches("/file/"))
+                      .decode_utf8_lossy().to_string();
+    let filepath = if filepath.is_empty() { "index.html".to_string() } else { filepath };
+
+    // prevent directory traversal
+    if filepath.contains("..") {
+        return Err(StatusCode::FORBIDDEN);
+    }
+
+    // build the full file path and try to open
+    let filepath = format!("./static/{}", filepath);
+    let file = fs::File::open(&filepath).await
+              .map_err(|_| StatusCode::NOT_FOUND)?;
+    
+    // get dat metadata
+    let metadata = file.metadata().await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    
+    // wrap file in a streaming body
+    let body = Body::wrap_stream(ReaderStream::new(file));
+    
+    // determine content type based on file extension
+    let content_type = match filepath.rsplit('.').next() {
+        // audio content
+        Some("ogg") => "audio/ogg",
+        Some("mp3") => "audio/mpeg",
+        Some("flac") => "audio/flac",
+        Some("wav") => "audio/wav",
+
+        // site content
+        Some("html") => "text/html",
+        Some("css") => "text/css",
+        Some("js") => "application/javascript",
+
+        // otherwise a stream
+        _ => "application/octet-stream",
+    };
+    
+    // build and return the response
+    Ok(Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CONTENT_LENGTH, metadata.len())
+        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
+        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS")
+        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range, Content-Type")
+        .header(header::ACCEPT_RANGES, "bytes")
+        .body(body)
+        .unwrap())
 }
 
 // song search
@@ -119,37 +161,30 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
 
 // cover search
 async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
-    // parse song name
+    // parse album id
     let id: i64 = path.trim_start_matches("/api/cover/")
         .parse()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
     
-    // search for one cover: albums store the cover, join via album_id
-    let row = sqlx::query("SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = ?")
-        .bind(id)
-        .fetch_one(&pool)
-        .await
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+    // find cover with that id
+    let cover: Option<Vec<u8>> = sqlx::query_scalar(
+        "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = ?"
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    // get that cover
-    let cover: Option<Vec<u8>> = row.get("cover");
-    if let Some(data) = cover {
-        return Ok(Response::builder()
-            .header(header::CONTENT_TYPE, "image/jpeg")
-            .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-            .body(Body::from(data))
-            .unwrap());
-    } 
-    
-    // proper error handling
-    else {
-        return Err(StatusCode::NOT_FOUND);
-    }
+    // return that hoe (or error if magic has happened. check if you deleted the cover metadata)
+    let data = cover.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Response::builder()
+        .body(Body::from(data))
+        .unwrap())
 }
 
 // album search
 async fn album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
-    // album id (yoinked frm above)
+    // album id (yoinked from above)
     let album_id: u16 = path.trim_start_matches("/api/album/")
         .parse()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
@@ -161,54 +196,24 @@ async fn album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    let album_name: String = row.get("name");
-    let album_artist: String = row.get("artist");
-    let album_runtime: u16 = row.get("runtime");
-    let album_songcount: u8 = row.get("songcount");
-
-    // fetch all songs in said album. this ones getting fat so i may move it
-    let rows = sqlx::query("SELECT s.id, s.name, s.duration, s.filename, a.name as album, a.artist as artist FROM songs s JOIN albums a ON s.album_id = a.id WHERE a.id = ? ORDER BY s.track_number ASC")
+    // fetch songs
+    let songs: Vec<Song> = sqlx::query_as("SELECT s.id, s.name, s.duration, s.filename, a.name as album, a.artist as artist FROM songs s JOIN albums a ON s.album_id = a.id WHERE a.id = ? ORDER BY s.track_number ASC")
         .bind(album_id)
         .fetch_all(&pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    let songs: Vec<Song> = rows.iter().map(|row| {
-        // fat blob of info
-        let id: u16 = row.get("id");
-        let name: String = row.get("name");
-        let artist: String = row.get("artist");
-        let album: String = row.get("album");
-        let duration: u16 = row.get("duration");
-        let filename: String = row.get("filename");
-
-        // thanks serde!!!!
-        Song {
-            id,
-            name,
-            artist,
-            album,
-            cover: None,
-            duration: duration,
-            filename,
-        }
-    }).collect();
-
-    // build a response w the info
+    // build into one big fat album
     let resp = Album {
-        id: album_id,
-        name: album_name,
-        artist: album_artist,
-        runtime: album_runtime,
-        songcount: album_songcount,
+        id: row.get("id"),
+        name: row.get("name"),
+        artist: row.get("artist"),
+        runtime: row.get("runtime"),
+        songcount: row.get("songcount"),
         songs,
     };
 
+    // serialize and send
     let json = serde_json::to_string(&resp).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, "application/json")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .body(Body::from(json))
-        .unwrap())
+    Ok(Response::builder().body(Body::from(json)).unwrap())
 }

@@ -5,4 +5,3 @@ pub mod db;
 pub mod login;
 pub mod models;
 pub mod scanner;
-pub mod server;

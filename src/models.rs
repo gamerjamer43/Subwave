@@ -1,6 +1,8 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sqlx::{FromRow};
 
-#[derive(Serialize)]
+// song models
+#[derive(FromRow, Serialize)]
 pub struct Song {
     pub id: u16,
 
@@ -17,7 +19,6 @@ pub struct Song {
     pub filename: String,
 }
 
-
 #[derive(serde::Serialize)]
 pub struct Album {
     pub id: u16,
@@ -30,4 +31,18 @@ pub struct Album {
 
     // ref to each song
     pub songs: Vec<Song>,
+}
+
+// request models
+#[derive(Deserialize)]
+pub struct AuthRequest {
+    pub username: String,
+    pub password: String
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Claims {
+    pub sub: String,
+    pub exp: usize,
+    pub iat: usize
 }
