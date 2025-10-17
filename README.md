@@ -1,11 +1,8 @@
-<h1 align="center"><img src="https://github.com/user-attachments/assets/9acd80d4-f555-4367-b54b-01b42bb575a7" width="35"> Subwave </h1><br>
+<h1 align="center"> Subwave 🌊 </h1>
+<h3 align="center">No bullshit here, only raw speed. Streams fast, searches faster, and doesn’t get in your way.</h3>
 
-<p align="center">
-    No bullshit here, only raw speed. Streams fast, searches faster, and doesn’t get in your way.
-</p>
-<p align="center">
-    <em>This project goes hand in hand with <a href="https://github.com/gamerjamer43/Hertzonic">Hertzonic</a>. Check it out!</em>
-</p>
+<p align="center"><img src="https://github.com/user-attachments/assets/978945d3-da0f-4224-ae93-c7c6cf880fce" width="250"></p>
+<p align="center"><em>This project goes hand in hand with <a href="https://github.com/gamerjamer43/Hertzonic">Hertzonic</a>. Check it out!</em></p>
 
 <p align="center">
     <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />

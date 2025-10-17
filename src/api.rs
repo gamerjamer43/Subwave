@@ -29,23 +29,43 @@ pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Bod
         };
     }
 
-    // if it's not a get, and anything below this, L 405
-    if let Err(status) = verify(&pool, &req).await {
-        return Ok(Response::builder()
-            .status(status)
-            .body(Body::from("unauthorized"))
-            .map_err(|_| StatusCode::METHOD_NOT_ALLOWED)?);
-    }
-    if method != Method::GET { return Err(StatusCode::METHOD_NOT_ALLOWED); }
+    // auth guard for non-auth routes
+    if let Some(resp) = auth(&pool, &req).await {return Ok(resp);}
+    if method != Method::GET {return Err(StatusCode::METHOD_NOT_ALLOWED);}
 
     // router part 2 electric boogaloo, only for the actual api methods
     match path.as_str() {
         p if p.starts_with("/api/search") => search(req, pool.clone()).await,
-        p if p.starts_with("/api/cover")  => cover(p, pool.clone()).await,
-        p if p.starts_with("/api/album")  => album(p, pool.clone()).await,
+        p if p.starts_with("/api/cover") => cover(p, pool.clone()).await,
+        p if p.starts_with("/api/album") => album(p, pool.clone()).await,
+        p if p == "/api/test" => test(pool.clone(), req).await,
         p if p.starts_with("/file/") => serve(p, req).await,
         _ => Err(StatusCode::NOT_FOUND),
     }
+}
+
+// if no auth, get fucked
+async fn auth(pool: &SqlitePool, req: &Request<Body>) -> Option<Response<Body>> {
+    if let Err(status) = verify(pool, req).await {
+        return Some(
+            Response::builder()
+                .status(status)
+                .body(Body::from("unauthorized"))
+                .unwrap(),
+        );
+    }
+    None
+}
+
+// basic token status check
+pub async fn test(pool: SqlitePool, req: Request<Body>) -> Result<Response<Body>, StatusCode> {
+    if let Some(resp) = auth(&pool, &req).await {return Ok(resp);}
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(r#"{"status":"ok"}"#))
+        .map_err(|_| StatusCode::UNAUTHORIZED)
 }
 
 // file service
@@ -54,7 +74,7 @@ pub async fn serve(path: &str, _req: Request<Body>) -> Result<Response<Body>, St
     // TODO: add escaping so we can't jack the db. idk if this is vulnerable or not but we'll look later
     let filepath = percent_decode_str(path.trim_start_matches("/file/"))
                       .decode_utf8_lossy().to_string();
-    let filepath = if filepath.is_empty() { "index.html".to_string() } else { filepath };
+    let filepath = if filepath.is_empty() {"index.html".to_string()} else {filepath};
 
     // prevent directory traversal
     if filepath.contains("..") {
