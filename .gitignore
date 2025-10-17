@@ -9,3 +9,4 @@ data/
 testcmds.sh
 
 # MY ENV VAR (it not a big deal so i'm just pushing it enjoy)
+.env

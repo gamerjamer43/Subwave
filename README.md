@@ -98,6 +98,7 @@ Note: The project used SQLite originally; schema and queries are adjusted for Po
 - `scanner::scan` indexes files under `./static/` and inserts metadata into the DB; if you fuck around with the server make sure it gets ran, either on startup or via a maintenance task.
 - Sessions are the one thing that isn't persistent. It uses an in-memory `SessionStore` (regenning on startup) with a 24 hour TTL. If you want session persistence, jack the values up and set an environment variable for the JWT key. The way I have it is just decently secure.
 - If you fuck around with anything, adding proper migrations (`sqlx-cli` or similar) might help. The `createdb.sql` file is cool and all but I needed to mess around a lot.
+- There is also a metadata helper! Run metadata.py to add image and text metadata to a song if it doesn't have the data you need.
 
 ## Roadmap
 

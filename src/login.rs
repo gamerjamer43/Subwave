@@ -2,7 +2,7 @@
 use hyper::{Body, Request, Response, StatusCode};
 
 // External crates - database
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 // Standard library
 use std::sync::LazyLock;
@@ -30,9 +30,9 @@ static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     secret.to_vec()
 });
 
-pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
+pub async fn signup(pool: PgPool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
     // check if the user already exists
-    if sqlx::query("SELECT 1 FROM users WHERE username = ?")
+    if sqlx::query("SELECT 1 FROM users WHERE username = $1")
         .bind(&req.username)
         .fetch_optional(&pool)
         .await
@@ -51,7 +51,7 @@ pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>
         .to_string();
 
     // store
-    sqlx::query("INSERT INTO users (username, password) VALUES (?, ?)")
+    sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
         .bind(&req.username)
         .bind(&password_hash)
         .execute(&pool)
@@ -65,9 +65,9 @@ pub async fn signup(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>
 }
 
 // still a big ass bottleneck in verification. we at 220 ms now with INSECURITY!!! magic numbers need to be removed too but this shit works so why not push
-pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
+pub async fn login(pool: PgPool, req: AuthRequest) -> Result<Response<Body>, StatusCode> {
     // fetch hash and verify in one go
-    let hash_str: String = sqlx::query_scalar("SELECT password FROM users WHERE username = ?")
+    let hash_str: String = sqlx::query_scalar("SELECT password FROM users WHERE username = $1")
         .bind(&req.username)
         .fetch_one(&pool)
         .await
@@ -90,8 +90,8 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
     let username = req.username.clone();
     let t = token.clone();
     tokio::spawn(async move {
-        let _ = sqlx::query("INSERT INTO sessions (username, token, issued) VALUES (?, ?, ?) \
-                             ON CONFLICT(username) DO UPDATE SET token=excluded.token, issued=excluded.issued")
+        let _ = sqlx::query("INSERT INTO sessions (username, token, issued) VALUES ($1, $2, $3) \
+                             ON CONFLICT (username) DO UPDATE SET token = EXCLUDED.token, issued = EXCLUDED.issued")
             .bind(&username)
             .bind(&t)
             .bind(now as i64)
@@ -105,7 +105,7 @@ pub async fn login(pool: SqlitePool, req: AuthRequest) -> Result<Response<Body>,
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
 }
 
-pub async fn verify(pool: &SqlitePool, req: &Request<Body>) -> Result<(), StatusCode> {
+pub async fn verify(pool: &PgPool, req: &Request<Body>) -> Result<(), StatusCode> {
     // decode header
     let token = req.headers()
         .get("authorization")
@@ -121,7 +121,7 @@ pub async fn verify(pool: &SqlitePool, req: &Request<Body>) -> Result<(), Status
     ).map_err(|e| { eprintln!("JWT decode failed: {:?}", e); StatusCode::UNPROCESSABLE_ENTITY })?;
 
     // jwt lib handles expiration check automatically (sends back a 422 if fucky)
-    sqlx::query("SELECT 1 FROM users WHERE username = ?")
+    sqlx::query("SELECT 1 FROM users WHERE username = $1")
         .bind(&token_data.claims.sub)
         .fetch_one(pool)
         .await

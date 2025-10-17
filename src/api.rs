@@ -2,7 +2,7 @@
 use hyper::{Body, Request, Response, StatusCode, Method, header};
 use tokio::fs;
 use tokio_util::io::ReaderStream;
-use sqlx::{SqlitePool, Row};
+use sqlx::{PgPool, Row};
 
 // escaping searches
 use percent_encoding::percent_decode_str;
@@ -14,7 +14,7 @@ use crate::models::{Song, Album, AuthRequest};
 use crate::login::{signup, login, verify};
 
 // basic handler
-pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+pub async fn handle(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     let method = req.method().clone();
     let path = req.uri().path().to_string();
 
@@ -45,7 +45,7 @@ pub async fn handle(req: Request<Body>, pool: SqlitePool) -> Result<Response<Bod
 }
 
 // if no auth, get fucked
-async fn auth(pool: &SqlitePool, req: &Request<Body>) -> Option<Response<Body>> {
+async fn auth(pool: &PgPool, req: &Request<Body>) -> Option<Response<Body>> {
     if let Err(status) = verify(pool, req).await {
         return Some(
             Response::builder()
@@ -58,7 +58,7 @@ async fn auth(pool: &SqlitePool, req: &Request<Body>) -> Option<Response<Body>> 
 }
 
 // basic token status check
-pub async fn test(pool: SqlitePool, req: Request<Body>) -> Result<Response<Body>, StatusCode> {
+pub async fn test(pool: PgPool, req: Request<Body>) -> Result<Response<Body>, StatusCode> {
     if let Some(resp) = auth(&pool, &req).await {return Ok(resp);}
 
     Response::builder()
@@ -123,7 +123,7 @@ pub async fn serve(path: &str, _req: Request<Body>) -> Result<Response<Body>, St
 }
 
 // song search
-async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+async fn search(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     // the shit we need to escape
     let raw_query = req.uri().query().unwrap_or("");
 
@@ -139,14 +139,14 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
     let search_term = search_term.trim_matches('"').trim();
 
     // build the pattern and search
-    let pattern = &format!("%{}%", search_term);
+    let pattern = format!("%{}%", search_term);
     let sql = include_str!("../queries/searchsong.sql");
 
     // run the query dynamically
     let rows = sqlx::query(sql)
-        .bind(pattern)
-        .bind(pattern)
-        .bind(pattern)
+        .bind(pattern.as_str())
+        .bind(pattern.as_str())
+        .bind(pattern.as_str())
         .fetch_all(&pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -156,12 +156,12 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
         .iter()
         .map(|row| {
             Song {
-                id: row.try_get::<i64, _>("id").unwrap_or(0) as u16,
+                id: row.try_get::<i32, _>("id").unwrap_or(0),
                 name: row.try_get::<String, _>("name").unwrap_or_default(),
                 artist: row.try_get::<String, _>("artist").unwrap_or_default(),
                 album: row.try_get::<String, _>("album").unwrap_or_default(),
                 cover: None, // don't send cover in list view
-                duration: row.try_get::<i64, _>("duration").unwrap_or(0) as u16,
+                duration: row.try_get::<i32, _>("duration").unwrap_or(0),
                 filename: row.try_get::<String, _>("filename").unwrap_or_default(),
             }
         })
@@ -180,7 +180,7 @@ async fn search(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, 
 }
 
 // cover search
-async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+async fn cover(path: &str, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     // parse album id
     let id: i64 = path.trim_start_matches("/api/cover/")
         .parse()
@@ -188,7 +188,7 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
     
     // find cover with that id
     let cover: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = ?"
+        "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1"
     )
     .bind(id)
     .fetch_one(&pool)
@@ -203,21 +203,27 @@ async fn cover(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
 }
 
 // album search
-async fn album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCode> {
+async fn album(path: &str, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     // album id (yoinked from above)
-    let album_id: u16 = path.trim_start_matches("/api/album/")
+    let album_id: i32 = path.trim_start_matches("/api/album/")
         .parse()
         .map_err(|_| StatusCode::BAD_REQUEST)?;
 
     // album metadata
-    let row = sqlx::query("SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = ?")
+    let row = sqlx::query("SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = $1")
         .bind(album_id)
         .fetch_one(&pool)
         .await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     // fetch songs
-    let songs: Vec<Song> = sqlx::query_as("SELECT s.id, s.name, s.duration, s.filename, a.name as album, a.artist as artist FROM songs s JOIN albums a ON s.album_id = a.id WHERE a.id = ? ORDER BY s.track_number ASC")
+    let songs: Vec<Song> = sqlx::query_as::<_, Song>(
+        "SELECT s.id, s.name, a.artist, a.name AS album, a.cover, s.duration, s.filename \
+         FROM songs s \
+         JOIN albums a ON s.album_id = a.id \
+         WHERE a.id = $1 \
+         ORDER BY s.track_number ASC"
+    )
         .bind(album_id)
         .fetch_all(&pool)
         .await
@@ -228,8 +234,8 @@ async fn album(path: &str, pool: SqlitePool) -> Result<Response<Body>, StatusCod
         id: row.get("id"),
         name: row.get("name"),
         artist: row.get("artist"),
-        runtime: row.get("runtime"),
-        songcount: row.get("songcount"),
+        runtime: row.get::<i32, _>("runtime"),
+        songcount: row.get::<i32, _>("songcount"),
         songs,
     };
 

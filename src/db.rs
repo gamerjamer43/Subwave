@@ -1,10 +1,17 @@
 use anyhow::Result;
-use sqlx::SqlitePool;
+use sqlx::PgPool;
 
 // initialize database schema
-pub async fn init(pool: &SqlitePool) -> Result<()> {
+pub async fn init(pool: &PgPool) -> Result<()> {
     // ig we're doing this compile time so sqlx stops WHINING
     let sql = include_str!("../queries/createdb.sql");
-    sqlx::query(sql).execute(pool).await?;
+
+    for statement in sql.split_terminator(';') {
+        let statement = statement.trim();
+        if statement.is_empty() {continue;}
+
+        sqlx::query(statement).execute(pool).await?;
+    }
+
     Ok(())
 }

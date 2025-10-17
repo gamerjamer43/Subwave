@@ -10,14 +10,13 @@ mod scanner;
 use cors::{add_cors_headers, cors_preflight};
 
 // stdlib
-use std::{convert::Infallible, net::SocketAddr, fs::File, time::Instant};
+use std::{convert::Infallible, net::SocketAddr, time::Instant};
 
-// sqlx for sqlite shit
-use sqlx::{Pool, Sqlite, // types
-           SqlitePool};  // driver
+// sqlx for postgres pooling
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 
 // hyper, the main http server
-use tokio::fs;                                           // one tokio helper
 use hyper::{Body, Request, Response, Server, StatusCode, // important shit
             service::{make_service_fn, service_fn}};     // attatching said important shit (service handlers)
 
@@ -27,21 +26,14 @@ use hyper::server::conn::AddrStream;
 // tokio is like flask, needs main (cuz of async runtime)
 #[tokio::main]
 async fn main() {
-    // ensure the directory exists
-    fs::create_dir_all("./data")
-        .await
-        .expect("Failed to create ./data, where the db file is stored.");
+    // postgres connection string lives in environment
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL env var must be set for postgres");
 
-    // create db if it doesn't exist
-    let db_path = "./data/music.db";
-    if !std::path::Path::new(db_path).exists() {
-        File::create(db_path)
-            .expect("Failed to create database file");
-        println!("Created database file at {}", db_path);
-    }
-
-    // open pool and connect (SQLite creates the file if missing)
-    let pool: Pool<Sqlite> = SqlitePool::connect("sqlite://./data/music.db")
+    // open pool and connect
+    let pool: PgPool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url)
         .await
         .expect("Failed to connect to database");
 
@@ -69,7 +61,7 @@ async fn main() {
 }
 
 // handle individual requests
-async fn handle_request(req: Request<Body>, pool: SqlitePool) -> Result<Response<Body>, Infallible> {
+async fn handle_request(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, Infallible> {
     // resolve path
     let start = Instant::now();
     let path = req.uri().path();

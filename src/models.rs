@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow};
 
-// song models
+// song models (ig i32 is the move... resizing is slow)
 #[derive(FromRow, Serialize)]
 pub struct Song {
-    pub id: u16,
+    pub id: i32,
 
     // song info
     pub name: String,
@@ -15,19 +15,19 @@ pub struct Song {
     pub cover: Option<Vec<u8>>,
 
     // file info
-    pub duration: u16,
+    pub duration: i32,
     pub filename: String,
 }
 
 #[derive(serde::Serialize)]
 pub struct Album {
-    pub id: u16,
+    pub id: i32,
     
     // album info
     pub name: String,
     pub artist: String,
-    pub runtime: u16,
-    pub songcount: u8,
+    pub runtime: i32,
+    pub songcount: i32,
 
     // ref to each song
     pub songs: Vec<Song>,
