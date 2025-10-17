@@ -38,9 +38,3 @@ CREATE TABLE IF NOT EXISTS playlists (
     name TEXT NOT NULL,
     FOREIGN KEY (userId) REFERENCES users(id) ON DELETE CASCADE
 );
-
-CREATE TABLE IF NOT EXISTS sessions (
-    username TEXT PRIMARY KEY,
-    token TEXT NOT NULL,
-    issued INTEGER NOT NULL
-);
