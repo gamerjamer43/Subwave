@@ -21,44 +21,59 @@
 - [Database schema](#database-schema)
 - [Development notes](#development-notes)
 - [Roadmap](#roadmap)
+- [Documentation](#documentation)
 - [Contributing](#contributing)
 
 ## Introduction
 
-Subwave doesn’t mess around. It’s built for speed: every request, every stream, every search is optimized to move fast. Featuring lightning-quick HTTP handling and no-clog asynchronous DBing, it slices through tasks with almost zero overhead. Metadata is pre-indexed, files are served directly from `./static/`, and the JSON API keeps things lightweight — no unnecessary layers, no slowdowns.  
-In short: Subwave is fast as hell because it does exactly what it needs to do, and nothing more.
+<h3 align="center">Subwave is a passion project meant to build on some of the painpoints of some of the existing options. Many of the most used self-hosting options are hair-yankingly painful to setup, so Subwave makes it simple, no extra setup beyond creating a single table. Designed to handle large amounts of music, so slowdowns will never be a concern — just plug and play wherever, whenever.</h3>
 
 ## Features
 
-- Built on **Hyper** for a smoking fast HTTP backend, and **sqlx** to carry the DBing on it's back. 
-- Literally every single operation is optimized. Signups take about 50ms, starting a music stream takes less than a millisecond, **EVERYTHING** is optimized as fast (albeit not lacking in security) as it can be.
+- Built on **Hyper** for a smoking fast HTTP backend, and **sqlx** as an absolute unit to drive **PostgreSQL** on it's back. 
+- Literally every single operation is optimized. Signups take about 50ms, starting a music stream takes less than a millisecond, **EVERYTHING** is fine-tuned to be as fast (albeit still security tough and feature robust) as it can be.
 - Deals with all the login auth bullshit for you! A header is provided on login, pass it with your requests to be allowed to access shit. Session tokens expire on server restart or after 24 hours, so don't hardcode it.
-- Super duper light executable. Only uses around 15 libraries which have a total of 272 dependencies, which I'm still working to chop down.
+- Pen-tested, stress-tested, and idiot-tested. Whether it's 20 songs or 200 thousand, you will have zero problems with hosting this publicly, whether it be from a lack of attention or a malicious outside source.
+- Air light executable. Only uses 14 uniquely important libs, which have a total of 287 dependencies.
 
 ## Quickstart (dev)
 
-All you need is Rust and [Postgres](https://www.postgresql.org/).
+You only need two things to start the setup process, [Rust](https://rust-lang.org/) and [Postgres](https://www.postgresql.org/download/).
 
 1) Clone the repo
 
 ```bash
 git clone <repo-url>
-cd flacend
+cd Subwave
 ```
 
-2) Set an env variable (example PowerShell and bash):
+2) Set an environment variable (example PowerShell and bash):
 
 ```powershell
 # ps
-$env:DATABASE_URL = "postgres://postgres:postgres@localhost:5432/flacend"
+$env:DATABASE_URL = "postgres://user:password@localhost:5432/ending"
+```
+
+```bash
+# cmd
+setx DATABASE_URL "postgres://user:password@localhost:5432/ending"
 ```
 
 ```bash
 # bash
-export DATABASE_URL="postgres://postgres:postgres@localhost:5432/flacend"
+export DATABASE_URL="postgres://user:password@localhost:5432/ending"
+
 ```
 
-3) Build & run. The server makes the DB for you!
+3) Create your table:
+```bash
+psql -U username
+```
+```sql
+CREATE TABLE TableName;
+```
+
+4) Build & run. The server builds the schema, and autofills the DB for you!
 
 ```bash
 # host defaults to port 6000.
@@ -67,20 +82,20 @@ cargo run
 ```
 
 ## Configuration
-Quite possibly the most simple thing you will ever do. Just point the database URL:
-- `DATABASE_URL` — Postgres connection string. Defaults to `postgres://postgres:postgres@localhost:5432/flacend` if not set. 
+Quite possibly the most simple thing you will ever do. Just point the database URL (this is in the above steps):
+- `DATABASE_URL` — Postgres connection string. This is the only thing besides the table you have to add!
 
 ## API Endpoints
 
 - Ungated:
-    - `POST /api/signup` — Body JSON: `{ "username": "alice", "password": "secret" }`, 201 Created on success.
-    - `POST/api/login` — Body JSON: `{ "username": "alice", "password": "secret" }`, 200 OK with token in response body (text)
-        - Pass an auth header: `Authorization: Bearer <token>`, for any requests that require authorization.
+    - `POST /api/signup` — Response body: `{ "username": "alice", "password": "secret" }`, 201 Created on success.
+    - `POST/api/login` — Response body: `{ "username": "alice", "password": "secret" }`, 200 OK with token in response body (text)
+        - Pass a standard auth header `Authorization: Bearer <token>`, for any gated requests.
 
 - Auth. Required:
-    - `GET /api/search?q=term` — JSON array of songs
-    - `GET /api/cover/:id` — album art (image/jpeg)
-    - `GET /api/album/:id` — album + song list
+    - `GET /api/search?q=term` — a basic select search from postgres using sql.
+    - `GET /api/cover/:id` — album art (image/jpeg).
+    - `GET /api/album/:id` — album and song list.
     - `GET /file/<path>` — serves the files in `./static/` by name.
 
 ## Database schema
@@ -102,10 +117,11 @@ Note: The project used SQLite originally; schema and queries are adjusted for Po
 
 ## Roadmap
 
-The goal of this was to provide a competitor to existing Subsonic forks. I've heard a lot of complaints about login auth and speed on thing like Navidrome or Airsonic, and a lot of the other options don't fully emulate the Subsonic API. So the long goal is to create a **completely new** speed optimized and security hardened ecosystem that if others like, they can fuck around with.
+This is meant to be a competitor to existing Subsonic forks. I've heard a lot of complaints about login auth, media DB corruption, sloggy performance on large song counts, and other unwanted garbage on platforms like Navidrome or Airsonic, and many of the other options don't fully achieve their goal of emulating the Subsonic API. This will, when done, be a **completely new,** speed optimized, and security hardened media server that if others like, they can fuck around with. Hey, you may even want to write your own media client when all is set and done.
 
 ### Immediate
-- [ ] Song upload route
+- [ ] Add serialized errors instead of just bare status codes.
+- [ ] Song upload route.
 - [ ] Full playlist support (favorites goes hand in hand with this).
 - [ ] Standard search and indexing improvements. Search right now is very basic.
 
@@ -124,12 +140,16 @@ The goal of this was to provide a competitor to existing Subsonic forks. I've he
 - [ ] Radio mode (auto suggest/play similar tracks)
 - [ ] Lyrics + timing. (.vtt subtitle or .lrc synced lyric files)
 - [ ] Recently played
-- [ ] Optional transcoder pipeline (format conversion)
+- [ ] On the fly transcoder (format conversion/compression)
 - [ ] Caching strategy / CDN-friendly headers
 
 ### Maybes
 - [ ] Websocket or SSE hooks for the slower shit (nothing has caused any unfixable issues, but we'll see)
 - [ ] ReplayGain normalization metadata support (store/read)
+
+## Documentation
+
+I have not started on this, because as of right now there's only ~650 lines of rust driving this whole thing. Come back later for more!
 
 ## Contributing
 
@@ -141,6 +161,7 @@ PRs are always welcome, but keep your changes small and focused on one specific 
 - [Hyper](https://hyper.rs/) - Quite possibly my favorite HTTP client for Rust. 
 - [sqlx](https://github.com/launchbadge/sqlx) - No contest. The BEST SQL driver. Migrating to Postgres was super easy.
 - [Argon2](https://github.com/sru-systems/rust-argon2) - Password hashing done right. Literally industry standard.
+- [PostgreSQL](https://postgresql.org) - Battle tested. The industry standard. If you're hosting for multiple people, or hosting a shitload of songs, this DB
 
 ---
 

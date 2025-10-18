@@ -5,16 +5,21 @@ use tokio_util::io::ReaderStream;
 use sqlx::{PgPool, Row};
 
 // escaping searches
-use percent_encoding::percent_decode_str;
+use percent_encoding::{percent_decode_str};
 
 // all necessary models
 use crate::models::{Song, Album, AuthRequest};
 
 // login helpers
+use crate::cors::{add_cors_headers};
 use crate::login::{signup, login, verify};
+
+// song search helper
+const SEARCH: String = include_str!("../queries/searchsong.sql");
 
 // basic handler
 pub async fn handle(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, StatusCode> {
+    // i'm allocating needlessly here, dubbin that in the next patch
     let method = req.method().clone();
     let path = req.uri().path().to_string();
 
@@ -110,49 +115,41 @@ pub async fn serve(path: &str, _req: Request<Body>) -> Result<Response<Body>, St
         _ => "application/octet-stream",
     };
     
-    // build and return the response
-    Ok(Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_LENGTH, metadata.len())
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
-        .header(header::ACCESS_CONTROL_ALLOW_METHODS, "GET, OPTIONS")
-        .header(header::ACCESS_CONTROL_ALLOW_HEADERS, "Range, Content-Type")
-        .header(header::ACCEPT_RANGES, "bytes")
+    // accept ranges is for streaming btw (just for y'all who don't know)
+    let mut response = Response::builder()
+        .header("Content-Type", content_type)
+        .header("Content-Length", metadata.len())
+        .header("Accept-Ranges", "bytes")
         .body(body)
-        .unwrap())
+        .unwrap();
+
+    add_cors_headers(&mut response);
+    Ok(response)
 }
 
 // song search
 async fn search(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, StatusCode> {
-    // the shit we need to escape
-    let raw_query = req.uri().query().unwrap_or("");
-
-    // build a query from this
-    // TODO: add escaping so we can't jack the db
-    let search_term = raw_query
+    // get raw query
+    let raw = req.uri().query().unwrap_or("");
+    let search = raw
         .split('&')
         .find_map(|kv| kv.strip_prefix("q="))
         .unwrap_or("");  
 
-    // decode any percent-encoded characters, trim quotes (we need a second borrow)
-    let search_term = percent_decode_str(search_term).decode_utf8_lossy();
-    let search_term = search_term.trim_matches('"').trim();
-
-    // build the pattern and search
+    // build search pattern
+    let search = percent_decode_str(search).decode_utf8_lossy();
+    let search_term = search.trim_matches('"').trim();
     let pattern = format!("%{}%", search_term);
-    let sql = include_str!("../queries/searchsong.sql");
 
-    // run the query dynamically
-    let rows = sqlx::query(sql)
-        .bind(pattern.as_str())
-        .bind(pattern.as_str())
+    // query for songs
+    let query = sqlx::query(&SEARCH)
         .bind(pattern.as_str())
         .fetch_all(&pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
-    // returned songs go here
-    let songs: Vec<Song> = rows
+    // list of matched songs
+    let songs: Vec<Song> = query
         .iter()
         .map(|row| {
             Song {
@@ -160,18 +157,16 @@ async fn search(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, Stat
                 name: row.try_get::<String, _>("name").unwrap_or_default(),
                 artist: row.try_get::<String, _>("artist").unwrap_or_default(),
                 album: row.try_get::<String, _>("album").unwrap_or_default(),
-                cover: None, // don't send cover in list view
                 duration: row.try_get::<i32, _>("duration").unwrap_or(0),
                 filename: row.try_get::<String, _>("filename").unwrap_or_default(),
+                cover: None,
             }
         })
         .collect();
     
-    // serde serializes this shit
-    let json = serde_json::to_string(&songs)
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // serialize and shoot er back
+    let json = serde_json::to_string(&songs).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     
-    // send back an ok!!!
     Ok(Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
         .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
@@ -182,20 +177,16 @@ async fn search(req: Request<Body>, pool: PgPool) -> Result<Response<Body>, Stat
 // cover search
 async fn cover(path: &str, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     // parse album id
-    let id: i64 = path.trim_start_matches("/api/cover/")
-        .parse()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let id: i64 = path.trim_start_matches("/api/cover/").parse()
+                      .map_err(|_| StatusCode::BAD_REQUEST)?;
     
     // find cover with that id
-    let cover: Option<Vec<u8>> = sqlx::query_scalar(
-        "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1"
-    )
-    .bind(id)
-    .fetch_one(&pool)
-    .await
-    .map_err(|_| StatusCode::NOT_FOUND)?;
+    let cover: Option<Vec<u8>> = sqlx::query_scalar("SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1")
+        .bind(id)
+        .fetch_one(&pool).await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
 
-    // return that hoe (or error if magic has happened. check if you deleted the cover metadata)
+    // return that hoe (or error if magic has happened. you prolly deleted a cover)
     let data = cover.ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Response::builder()
         .body(Body::from(data))
@@ -212,8 +203,7 @@ async fn album(path: &str, pool: PgPool) -> Result<Response<Body>, StatusCode> {
     // album metadata
     let row = sqlx::query("SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = $1")
         .bind(album_id)
-        .fetch_one(&pool)
-        .await
+        .fetch_one(&pool).await
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     // fetch songs
@@ -225,8 +215,7 @@ async fn album(path: &str, pool: PgPool) -> Result<Response<Body>, StatusCode> {
          ORDER BY s.track_number ASC"
     )
         .bind(album_id)
-        .fetch_all(&pool)
-        .await
+        .fetch_all(&pool).await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     // build into one big fat album

@@ -1,8 +1,15 @@
-use std::path::Path;
+// backend shit
+use tokio::fs;
 use anyhow::Result;
 use sqlx::PgPool;
-use tokio::fs;
+
+// metadata helpers
+use std::path::Path;
 use lofty::{prelude::AudioFile, probe::Probe, tag::Accessor, file::TaggedFileExt};
+
+// queries (global lofted because 1. idk where else to put em but 2. no need to include str every fuckin time)
+const UPSERTSONG: &str = include_str!("../queries/upsertsong.sql");
+const UPSERTALBUM: &str = include_str!("../queries/upsertalbum.sql");
 
 // helper macros to avoid repeating the same Option to String bullshit
 macro_rules! tag_str {
@@ -57,11 +64,10 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     if let Some(_) = sqlx::query("SELECT 1 FROM songs WHERE filename = $1")
         .bind(&filename)
         .fetch_optional(pool)
-        .await?
-    {
-        println!("Skipping already indexed: {}", filename);
-        return Ok(());
-    }
+        .await? {
+            println!("Skipping already indexed: {}", filename);
+            return Ok(());
+        }
 
     // open file using a probe, get its tags or the first one (potentially even none) if we don't have it
     let tagged_file = Probe::open(path)?.read()?;
@@ -75,28 +81,22 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let duration = tagged_file.properties().duration().as_secs() as i32;
     
     // create albums
-    sqlx::query(
-        "INSERT INTO albums (name, artist, cover, runtime, songcount)
-         VALUES ($1, $2, $3, 0, 0)
-         ON CONFLICT (name, artist) DO NOTHING"
-    )
-    .bind(&album)
-    .bind(&artist)
-    .bind(cover.as_deref())
-    .execute(pool)
-    .await?;
+    sqlx::query(UPSERTALBUM)
+        .bind(&album)
+        .bind(&artist)
+        .bind(cover.as_deref())
+        .execute(pool)
+        .await?;
 
     // album ids
-    let album_id: i32 = sqlx::query_scalar(
-        "SELECT id FROM albums WHERE name = $1 AND artist = $2"
-    )
-    .bind(&album)
-    .bind(&artist)
-    .fetch_one(pool)
-    .await?;
+    let album_id: i32 = sqlx::query_scalar("SELECT id FROM albums WHERE name = $1 AND artist = $2")
+        .bind(&album)
+        .bind(&artist)
+        .fetch_one(pool)
+        .await?;
 
     // ts so fucked. track number is a placeholder zero if not found
-    sqlx::query(include_str!("../queries/upsertsong.sql"))
+    sqlx::query(UPSERTSONG)
         .bind(&name)
         .bind(album_id)
         .bind(0_i32) // placeholder track number when none is available

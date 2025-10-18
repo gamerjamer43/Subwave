@@ -1,7 +1,5 @@
-// web shit
+// backend
 use hyper::{Body, Request, Response, StatusCode};
-
-// External crates - database
 use sqlx::PgPool;
 
 // Standard library
@@ -20,10 +18,11 @@ use crate::models::{AuthRequest, Claims};
 
 // doing this w lazy evaluation so i only have to do this once. fuck you rust!!! you have brought me so much joy and so much pain
 static ARGON2: LazyLock<Argon2<'static>> = LazyLock::new(|| {
-    Argon2::new(Algorithm::Argon2id, Version::V0x13, Params::new(8000, 2, 1, None).expect("valid argon2 params"))
+    Argon2::new(Algorithm::Argon2id, Version::V0x13,
+         Params::new(8000, 2, 1, None).expect("valid argon2 params"))
 });
 
-// jwt secret key (changes each time you run)
+// jwt secret key (32 byte token that changes each time you run, will add set tokens soon)
 static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     let mut secret = [0u8; 32];
     OsRng.fill_bytes(&mut secret);
@@ -35,25 +34,21 @@ pub async fn signup(pool: PgPool, req: AuthRequest) -> Result<Response<Body>, St
     if sqlx::query("SELECT 1 FROM users WHERE username = $1")
         .bind(&req.username)
         .fetch_optional(&pool)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .is_some()
-    // 401 if it already exists
-    {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+        .await.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some() {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
 
     // salt n hash
-    let salt = SaltString::generate(&mut OsRng);
-    let password_hash = ARGON2
-        .hash_password(req.password.as_bytes(), &salt)
+    let password = ARGON2
+        .hash_password(req.password.as_bytes(), &SaltString::generate(&mut OsRng))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
 
     // store
     sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
         .bind(&req.username)
-        .bind(&password_hash)
+        .bind(&password)
         .execute(&pool)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -79,29 +74,35 @@ pub async fn login(pool: PgPool, req: AuthRequest) -> Result<Response<Body>, Sta
 
     // create jwt
     let now = Utc::now().timestamp() as usize;
-    let token = encode(
+    let jwt = encode(
         &Header::default(),
-        &Claims { sub: req.username.clone(), iat: now, exp: now + 86400 },
+        &Claims {
+            // defaulted to 24 hours fuck w it as you wish
+            sub: req.username.clone(), iat: now, exp: now + 86400 
+        },
         &EncodingKey::from_secret(&JWT_SECRET),
     ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // store session (fire and forget for speed)
-    let pool_clone = pool.clone();
-    let username = req.username.clone();
-    let t = token.clone();
+    // token will drop if i don't clone dat jawn
+    let t = jwt.clone();
     tokio::spawn(async move {
-        let _ = sqlx::query("INSERT INTO sessions (username, token, issued) VALUES ($1, $2, $3) \
-                             ON CONFLICT (username) DO UPDATE SET token = EXCLUDED.token, issued = EXCLUDED.issued")
-            .bind(&username)
-            .bind(&t)
-            .bind(now as i64)
-            .execute(&pool_clone)
-            .await;
+        async move {
+            if let Err(e) = sqlx::query("INSERT INTO sessions (username, token, issued) VALUES ($1, $2, $3) \
+                                        ON CONFLICT (username) DO UPDATE SET token = EXCLUDED.token, issued = EXCLUDED.issued")
+                .bind(&req.username)
+                .bind(&t)
+                .bind(now as i64)
+                .execute(&pool)
+                .await
+            {
+                eprintln!("session insert failed: {e}");
+            }
+        }
     });
 
     Ok(Response::builder()
         .header("Content-Type", "application/json")
-        .body(Body::from(token))
+        .body(Body::from(jwt))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
 }
 

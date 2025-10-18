@@ -23,7 +23,7 @@ percent-encoding = "2.3.2"
 
 # auth helpers
 rand_core = { version = "0.6", features = ["getrandom"] }
-hex = "0.4.3"
 argon2 = "0.5"
 chrono = "0.4.42"
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"]}
+dotenvy = "0.15.7"
