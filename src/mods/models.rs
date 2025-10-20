@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow};
+use sqlx::FromRow;
 
 // song models (ig i32 is the move... resizing is slow)
 #[derive(FromRow, Serialize)]
@@ -22,7 +22,7 @@ pub struct Song {
 #[derive(serde::Serialize)]
 pub struct Album {
     pub id: i32,
-    
+
     // album info
     pub name: String,
     pub artist: String,
@@ -37,12 +37,12 @@ pub struct Album {
 #[derive(Deserialize)]
 pub struct AuthRequest {
     pub username: String,
-    pub password: String
+    pub password: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
     pub exp: usize,
-    pub iat: usize
+    pub iat: usize,
 }

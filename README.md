@@ -1,7 +1,7 @@
 <h1 align="center"> Subwave 🌊 </h1>
-<h3 align="center">No bullshit here, only raw speed. Streams fast, searches faster, and doesn’t get in your way.</h3>
 
 <p align="center"><img src="https://github.com/user-attachments/assets/978945d3-da0f-4224-ae93-c7c6cf880fce" width="250"></p>
+<h3 align="center">Raw speed, wherever you may be. Raw compatibility, whatever you may be on. It's the new wave.</h3>
 <p align="center"><em>This project goes hand in hand with <a href="https://github.com/gamerjamer43/Hertzonic">Hertzonic</a>. Check it out!</em></p>
 
 <p align="center">
@@ -51,26 +51,26 @@ cd Subwave
 
 ```powershell
 # ps
-$env:DATABASE_URL = "postgres://user:password@localhost:5432/ending"
+$env:DATABASE_URL = "postgres://user:password@localhost:5432/subwave"
 ```
 
 ```bash
 # cmd
-setx DATABASE_URL "postgres://user:password@localhost:5432/ending"
+setx DATABASE_URL "postgres://user:password@localhost:5432/subwave"
 ```
 
 ```bash
 # bash
-export DATABASE_URL="postgres://user:password@localhost:5432/ending"
+export DATABASE_URL="postgres://user:password@localhost:5432/subwave"
 
 ```
 
-3) Create your table:
+3) Create your table (defaulted to subwave):
 ```bash
 psql -U username
 ```
 ```sql
-CREATE TABLE TableName;
+CREATE TABLE subwave;
 ```
 
 4) Build & run. The server builds the schema, and autofills the DB for you!
