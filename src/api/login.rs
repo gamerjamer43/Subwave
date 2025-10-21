@@ -4,10 +4,7 @@ use crate::{
 };
 
 // TODO: potentially migrate off sqlx. it's quite heavy
-use sqlx::{
-    PgPool, query,
-    query_scalar
-};
+use sqlx::{PgPool, query, query_file, query_scalar};
 
 // axum high level server
 use axum::{
@@ -55,7 +52,6 @@ const JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     OsRng.fill_bytes(&mut secret);
     secret.to_vec()
 });
-const UPSERTSESSION: &str = include_str!("../queries/upsertsession.sql");
 
 pub async fn signup(
     State(pool): State<PgPool>,
@@ -63,8 +59,10 @@ pub async fn signup(
 ) -> Response<Body> {
     match async {
         // check if the user already exists
-        if query("SELECT 1 FROM users WHERE username = $1")
-            .bind(&req.username)
+        if query_scalar!(
+            "SELECT 1::int FROM users WHERE username = $1",
+            &req.username
+        )
             .fetch_optional(&pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
@@ -79,12 +77,14 @@ pub async fn signup(
             .to_string();
 
         // store
-        query("INSERT INTO users (username, password) VALUES ($1, $2)")
-            .bind(&req.username)
-            .bind(&password)
-            .execute(&pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        query!(
+            "INSERT INTO users (username, password) VALUES ($1, $2)",
+            &req.username,
+            &password
+        )
+        .execute(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         Ok(Response::builder()
             .status(StatusCode::CREATED)
@@ -97,15 +97,18 @@ pub async fn signup(
     }
 }
 
-// still a big ass bottleneck in verification. we at 220 ms now with INSECURITY!!! magic numbers need to be removed too but this shit works so why not push
+// still a big ass bottleneck in verification. we at 80 ms now with mild insecurity.
 pub async fn login(
     State(pool): State<PgPool>,
     Json(req): Json<AuthRequest>,
 ) -> Response<Body> {
     match async {
-        let hash: String = query_scalar("SELECT password FROM users WHERE username = $1")
-            .bind(&req.username)
-            .fetch_one(&pool).await
+        let hash: String = query_scalar!(
+            "SELECT password FROM users WHERE username = $1",
+            &req.username
+        )
+            .fetch_one(&pool)
+            .await
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
         ARGON2.verify_password(
@@ -124,21 +127,23 @@ pub async fn login(
                 exp: now + 86400,
             },
             &EncodingKey::from_secret(&JWT_SECRET),
-        )
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         // token will drop if i don't clone dat jawn
         let token_for_db = jwt.clone();
         let username = req.username.clone();
         let pool_clone = pool.clone();
         tokio::spawn(async move {
-            if let Err(e) = query(&UPSERTSESSION)
-                .bind(&username)
-                .bind(&token_for_db)
-                .bind(now as i64)
-                .execute(&pool_clone).await {
-                    eprintln!("session insert failed: {e}");
-                }
+            if let Err(e) = query_file!(
+                "queries/upsertsession.sql",
+                &username,
+                &token_for_db,
+                now as i64
+            )
+            .execute(&pool_clone)
+            .await {
+                eprintln!("session insert failed: {e}");
+            }
         });
 
         // build a response
@@ -176,10 +181,13 @@ pub async fn verify(
     })?;
 
     // jwt lib handles expiration check automatically (sends back a 422 if fucky)
-    query("SELECT 1 FROM users WHERE username = $1")
-        .bind(&token_data.claims.sub)
-        .fetch_one(pool).await
-        .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
+    query!(
+        "SELECT 1::int FROM users WHERE username = $1",
+        &token_data.claims.sub
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
 
     // success
     Ok(())

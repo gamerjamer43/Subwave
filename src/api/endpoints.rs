@@ -2,34 +2,31 @@
 use tokio::fs;
 use tokio_util::io::ReaderStream;
 use axum::{
-    body::Body,
+    body::Body, middleware::Next,
     extract::{Path, Query, State},
     http::{header, Request, StatusCode},
-    middleware::Next,
     response::{IntoResponse, Response},
 };
-use sqlx::{
-    PgPool, Row,
-    query, query_as, query_scalar
-};
+
+// dbing
+use sqlx::{PgPool, query, query_file_as, query_scalar};
 
 // escaping searches
 use percent_encoding::percent_decode_str;
-use std::collections::HashMap;
-
-// all necessary models
-use crate::mods::models::{Album, Song};
+use std::{borrow::Cow, collections::HashMap};
+use serde_json::to_string;
 
 // login helpers
-use crate::api::{
-    cors::add_cors_headers,
-    login::verify,
-    router::{status_response}
+use crate::{
+    api::{
+        cors::add_cors_headers,
+        login::verify,
+        router::{status_response}
+    },
+    mods::{
+        models::{Album, Song}
+    }
 };
-
-// song search helper
-const SEARCHSONG: &str = include_str!("../queries/searchsong.sql");
-const SEARCHALBUM: &str = include_str!("../queries/searchalbum.sql");
 
 // auth middleware
 pub async fn require_auth<B>(
@@ -128,36 +125,22 @@ pub async fn serve(Path(path): Path<String>) -> Response<Body> {
 // song search
 pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<String, String>>) -> Response<Body> {
     // get raw query
-    let search = params.get("q").cloned().unwrap_or_default();
+    let search: String = params.get("q").cloned().unwrap_or_default();
 
     // build search pattern
-    let search = percent_decode_str(&search).decode_utf8_lossy();
-    let search_term = search.trim_matches('"').trim();
-    let pattern = format!("%{}%", search_term);
+    let search: Cow<'_, str> = percent_decode_str(&search).decode_utf8_lossy();
+    let search_term: &str = search.trim_matches('"').trim();
+    let pattern: String = format!("%{}%", search_term);
 
     // query for songs
-    let query = match query(SEARCHSONG)
-        .bind(pattern.as_str())
+    let songs: Vec<Song> = match query_file_as!(Song, "queries/searchsong.sql", pattern.as_str())
         .fetch_all(&pool).await {
-            Ok(q) => q,
+            Ok(s) => s,
             Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
         };
 
-    // list of matched songs
-    let songs: Vec<Song> = query
-        .iter()
-        .map(|row| Song {
-            id: row.try_get::<i32, _>("id").unwrap_or(0),
-            name: row.try_get::<String, _>("name").unwrap_or_default(),
-            artist: row.try_get::<String, _>("artist").unwrap_or_default(),
-            album: row.try_get::<String, _>("album").unwrap_or_default(),
-            duration: row.try_get::<i32, _>("duration").unwrap_or(0),
-            filename: row.try_get::<String, _>("filename").unwrap_or_default(),
-            cover: None,
-        }).collect();
-
     // serialize and shoot er back
-    let json = match serde_json::to_string(&songs) {
+    let json = match to_string(&songs) {
         Ok(j) => j,
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -171,15 +154,16 @@ pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<Str
 }
 
 // cover search
-pub async fn cover(Path(id): Path<i64>, State(pool): State<PgPool>) -> Response<Body> {
+pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> Response<Body> {
     // parse album id
-    let song_id = id;
+    let song_id: i32 = id;
 
     // find cover with that id
-    let cover: Option<Vec<u8>> = match query_scalar(
+    let cover: Option<Vec<u8>> = match query_scalar!(
         "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1",
-    ).bind(song_id)
-    .fetch_one(&pool).await{
+        song_id
+    ).fetch_one(&pool)
+    .await {
         Ok(c) => c,
         Err(_) => return status_response(StatusCode::NOT_FOUND),
     };
@@ -200,21 +184,21 @@ pub async fn cover(Path(id): Path<i64>, State(pool): State<PgPool>) -> Response<
 // album search
 pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Response<Body> {
     // album id (yoinked from above)
-    let album_id = album_id;
+    let album_id: i32 = album_id;
 
     // album metadata
-    let row = match query(
+    let row = match query!(
         "SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = $1",
+        album_id
     )
-        .bind(album_id)
-        .fetch_one(&pool).await {
-            Ok(r) => r,
-            Err(_) => return status_response(StatusCode::NOT_FOUND),
-        };
+    .fetch_one(&pool)
+    .await {
+        Ok(r) => r,
+        Err(_) => return status_response(StatusCode::NOT_FOUND),
+    };
 
     // fetch songs
-    let songs: Vec<Song> = match query_as::<_, Song>(SEARCHALBUM)
-        .bind(album_id)
+    let songs: Vec<Song> = match query_file_as!(Song, "queries/searchalbum.sql", album_id)
         .fetch_all(&pool).await {
             Ok(s) => s,
             Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
@@ -222,16 +206,16 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
 
     // build into one big fat album
     let resp = Album {
-        id: row.get("id"),
-        name: row.get("name"),
-        artist: row.get("artist"),
-        runtime: row.get::<i32, _>("runtime"),
-        songcount: row.get::<i32, _>("songcount"),
+        id: row.id,
+        name: row.name,
+        artist: row.artist,
+        runtime: row.runtime,
+        songcount: row.songcount,
         songs,
     };
 
     // serialize and send
-    let json = match serde_json::to_string(&resp) {
+    let json = match to_string(&resp) {
         Ok(j) => j,
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };

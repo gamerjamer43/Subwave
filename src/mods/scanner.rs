@@ -1,6 +1,6 @@
 // backend shit
 use anyhow::Result;
-use sqlx::{PgPool, query};
+use sqlx::{PgPool, query_file, query_scalar};
 
 // filepaths
 use tokio::fs::read_dir;
@@ -13,9 +13,6 @@ use lofty::{
     probe::Probe, 
     tag::Accessor
 };
-
-// upserter
-const UPSERT: &str = include_str!("../queries/upsert.sql");
 
 // helper macros to avoid repeating the same Option to String bullshit
 macro_rules! tag_str {
@@ -66,10 +63,13 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let filename: String = format!("{}", path.file_name().unwrap().to_string_lossy());
 
     // skip reindexing
-    if let Some(_) = query("SELECT 1 FROM songs WHERE filename = $1")
-        .bind(&filename)
+    if query_scalar!(
+        "SELECT 1::int FROM songs WHERE filename = $1",
+        filename
+    )
         .fetch_optional(pool)
-        .await? {
+        .await?
+        .is_some() {
             return Ok(());
         }
 
@@ -85,17 +85,20 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let cover: Option<Vec<u8>> = tag_opt_pic!(tag);
 
     // upsert all that info (this shit deals w album and song inserts)
-    query(&UPSERT)
-        .bind(&album)
-        .bind(&artist)
-        .bind(cover.as_deref())
-        .bind(&name)
+    query_file!(
+        "queries/upsert.sql",
+        album,
+        artist,
+        cover.as_deref(),
+        name,
 
         // TODO: make track listings actually work
-        .bind(0_i32)
-        .bind(duration)
-        .bind(&filename)
-        .execute(pool).await?;
+        0_i32,
+        duration,
+        filename
+    )
+        .execute(pool)
+        .await?;
 
     println!("Indexed: {} - {} ({})", artist, name, album);
     Ok(())

@@ -1,6 +1,9 @@
 # compiled binaries
 /target
 
+# sqlx cache (do cargo sqlx prepare)
+.sqlx/
+
 # MY SONGS!!!! ALL MINE!!!!!!! (ensure you make a static and data folder)
 static/
 data/

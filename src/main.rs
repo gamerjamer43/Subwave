@@ -2,9 +2,7 @@ mod mods;
 mod api;
 
 use crate::{
-    mods::{
-        db::init, scanner::scan,
-    },
+    mods::{scanner::scan},
     api::{
         cors::{add_cors_headers, cors_preflight}, 
         router::route
@@ -48,10 +46,6 @@ async fn main() {
         .max_connections(10)
         .connect(&URL).await
         .expect("Failed to connect to Postgres. Is the server running?");
-
-    // first time runs initialize schema, otherwise pull db
-    init(&pool).await
-        .expect("DB initialization failed");
 
     // fw this folder name if you want your shit elsewhere
     scan(&pool, "./static").await

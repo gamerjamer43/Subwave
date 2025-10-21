@@ -18,7 +18,7 @@
 - [Configuration](#configuration)
 - [API Endpoints](#api-endpoints)
 - [Database schema](#database-schema)
-- [Development notes](#development-notes)
+- [Development logs](#development-logs)
 - [Roadmap](#roadmap)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
@@ -29,7 +29,7 @@
 
 ## Features
 
-- Built on top of **Hyper** using **Tower** and **Axum** for a smoking fast HTTP backend, and **sqlx** as an absolute unit to drive **PostgreSQL** on it's back. 
+- Built on top of [Hyper](https://github.com/hyperium/hyper) using [Tower](https://github.com/tower-rs/tower) and [Axum](https://github.com/tokio-rs/axum) for a smoking fast HTTP backend, and [sqlx](https://github.com/launchbadge/sqlx) as an absolute unit to drive [Postgres](https://postgresql.org) on it's back.
 - Literally every single operation is optimized. Signups take about 50ms, starting a music stream takes less than a millisecond, **EVERYTHING** is fine-tuned to be as fast (albeit still security tough and feature robust) as it can be.
 - Deals with all the login auth bullshit for you! A header is provided on login, pass it with your requests to be allowed to access shit. Session tokens expire on server restart or after 24 hours, so don't hardcode it.
 - Pen-tested, stress-tested, and idiot-tested. Whether it's 20 songs or 200 thousand, you will have zero problems with hosting this publicly, whether it be from a lack of attention or a malicious outside source.
@@ -64,20 +64,26 @@ export DATABASE_URL="postgres://user:password@localhost:5432/subwave"
 
 ```
 
-3) Create your table (defaulted to subwave):
+3) Populate your DB with the schema this code needs. (defaulted to subwave):
 ```bash
-psql -U username
-```
-```sql
-CREATE TABLE subwave;
+psql -U username -d subwave -f queries/createdb.sql
 ```
 
-4) Build & run. The server builds the schema, and autofills the DB for you!
+4) Prep, build & run. The server autofills the DB for you!
 
 ```bash
-# host defaults to port 6000.
-cargo build
+# prep the db before hand for the compile time macros
+cargo sqlx prepare
+
+# host defaults to port 6000. use release for an optimized binary
+cargo build # --release
 cargo run
+```
+
+5) If you ever need a full clean:
+```bash
+# remove .sqlx/, then run
+cargo clean
 ```
 
 ## Configuration
@@ -166,7 +172,7 @@ PRs are always welcome, but keep your changes small and focused on one specific 
 - [Axum](https://github.com/tokio-rs/axum) - Quite possibly my favorite HTTP client for Rust, Hyper, has a way higher level version, for way more control. I like Axum a lot.
 - [sqlx](https://github.com/launchbadge/sqlx) - No contest. The BEST SQL driver. Migrating to Postgres was super easy.
 - [Argon2](https://github.com/sru-systems/rust-argon2) - Password hashing done right. Literally industry standard.
-- [PostgreSQL](https://postgresql.org) - Battle tested. The industry standard. If you're hosting for multiple people, or hosting a shitload of songs, this DB
+- [Postgres](https://postgresql.org) - You already know, it's industry standard. If you're hosting for multiple people, or hosting a shitload of songs, this DB will handle it, no problem.
 
 ---
 
