@@ -1,34 +1,34 @@
-// all this bs exists cuz the structure is flat. imma remove it
 mod mods;
+mod api;
 
-use crate::mods::{
-    cors::{add_cors_headers, cors_preflight}, 
-    db::init, 
-    scanner::scan, 
-    router::route
+use crate::{
+    mods::{
+        db::init, scanner::scan,
+    },
+    api::{
+        cors::{add_cors_headers, cors_preflight}, 
+        router::route
+    }
 };
 
 use dotenvy::dotenv;
 use std::{
-    cell::LazyCell, 
     convert::Infallible, 
     env::var, net::SocketAddr, 
-    time::Instant
+    cell::LazyCell, time::Instant
 };
 
 // switching this jawn over to axum
 // use tower::limit::RateLimitLayer;
 use axum::{
-    body::{boxed, BoxBody}, 
+    body::{boxed, BoxBody}, Router, Server,
     extract::connect_info::ConnectInfo,
     middleware::{from_fn, Next},
     http::{Method, Request, Response},
-    Router, Server
 };
 
 // sqlx is fire use it even if u change anything
-use sqlx::postgres::PgPoolOptions;
-use sqlx::PgPool;
+use sqlx::{PgPool, postgres::PgPoolOptions};
 
 // address is hardcoded frn (i should prolly delegate that to env, but it would da just be port)
 const ADDR: LazyCell<SocketAddr> = LazyCell::new(|| SocketAddr::from(([0, 0, 0, 0], 6000)));
@@ -40,8 +40,8 @@ async fn main() {
     let addr: SocketAddr = *ADDR;
     dotenv().ok();
     
-    println!("Postgres URL: {}\n", URL.clone());
-    println!("\nListening on http://{}", addr);
+    println!("\nPostgres URL: {}", URL.clone());
+    println!("Listening on http://{}", addr);
 
     // aye aye aye i'm a basic bitch. if it ain't broke...
     let pool: PgPool = PgPoolOptions::new()
@@ -91,7 +91,7 @@ async fn handle_request<B>(req: Request<B>, next: Next<B>)
     let duration_ms = start.elapsed().as_micros();
 
     println!(
-        "{}{} {} - {:.2}μs",
+        "{}{} {} - {}μs",
         remote_addr.map(|a| format!("{a} ")).unwrap_or_default(),
         path, response.status(), duration_ms
     );

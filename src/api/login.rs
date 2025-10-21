@@ -1,43 +1,61 @@
-use sqlx::PgPool;
+use crate::{
+    mods::models::{AuthRequest, Claims},
+    api::{router::status_response}
+};
+
+// TODO: potentially migrate off sqlx. it's quite heavy
+use sqlx::{
+    PgPool, query,
+    query_scalar
+};
+
+// axum high level server
 use axum::{
     body::Body,
+    response::Response,
     extract::{Json, State},
     http::{HeaderMap, StatusCode},
-    response::Response,
 };
 
-// the tools ACTUALLY needed
+// argon 2 hashing
 use argon2::{
-    password_hash::{PasswordHash, SaltString},
-    Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version,
+    password_hash::{
+        PasswordHash, SaltString, 
+        rand_core::{OsRng, RngCore}
+    },
+    Algorithm, Argon2, Version, Params, 
+    PasswordHasher, PasswordVerifier
 };
+
+// jwt helpers
 use chrono::Utc;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-
-// (also tokens expire on restart this way)
-use rand_core::{OsRng, RngCore};
-
-// request models
-use crate::mods::models::{AuthRequest, Claims};
-use crate::mods::router::status_response;
+use jsonwebtoken::{
+    decode, encode,
+    DecodingKey, EncodingKey, 
+    Header, Validation
+};
 
 // doing this w lazy evaluation so i only have to do this once. fuck you rust!!! you have brought me so much joy and so much pain
 use std::sync::LazyLock;
 
-static ARGON2: LazyLock<Argon2<'static>> = LazyLock::new(|| {
+// argon 2 password hasher
+static ARGON2: std::sync::LazyLock<Argon2<'static>> = LazyLock::new(|| {
     Argon2::new(
         Algorithm::Argon2id,
         Version::V0x13,
-        Params::new(8000, 2, 1, None).expect("valid argon2 params"),
+        Params::new(8000, 2, 1, None)
+            .expect("valid argon2 params"),
     )
 });
 
-// jwt secret key (32 byte token that changes each time you run, will add set tokens soon)
-static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
+// jwt secret key (32 byte token that changes each time you run)
+// TODO: add set tokens so session strores arent useless
+const JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     let mut secret = [0u8; 32];
     OsRng.fill_bytes(&mut secret);
     secret.to_vec()
 });
+const UPSERTSESSION: &str = include_str!("../queries/upsertsession.sql");
 
 pub async fn signup(
     State(pool): State<PgPool>,
@@ -45,15 +63,14 @@ pub async fn signup(
 ) -> Response<Body> {
     match async {
         // check if the user already exists
-        if sqlx::query("SELECT 1 FROM users WHERE username = $1")
+        if query("SELECT 1 FROM users WHERE username = $1")
             .bind(&req.username)
             .fetch_optional(&pool)
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .is_some()
-        {
-            return Err(StatusCode::UNAUTHORIZED);
-        }
+            .is_some() {
+                return Err(StatusCode::UNAUTHORIZED);
+            }
 
         // salt n hash
         let password = ARGON2
@@ -62,7 +79,7 @@ pub async fn signup(
             .to_string();
 
         // store
-        sqlx::query("INSERT INTO users (username, password) VALUES ($1, $2)")
+        query("INSERT INTO users (username, password) VALUES ($1, $2)")
             .bind(&req.username)
             .bind(&password)
             .execute(&pool)
@@ -86,7 +103,7 @@ pub async fn login(
     Json(req): Json<AuthRequest>,
 ) -> Response<Body> {
     match async {
-        let hash: String = sqlx::query_scalar("SELECT password FROM users WHERE username = $1")
+        let hash: String = query_scalar("SELECT password FROM users WHERE username = $1")
             .bind(&req.username)
             .fetch_one(&pool).await
             .map_err(|_| StatusCode::UNAUTHORIZED)?;
@@ -115,7 +132,7 @@ pub async fn login(
         let username = req.username.clone();
         let pool_clone = pool.clone();
         tokio::spawn(async move {
-            if let Err(e) = sqlx::query(include_str!("queries/upsertsession.sql"))
+            if let Err(e) = query(&UPSERTSESSION)
                 .bind(&username)
                 .bind(&token_for_db)
                 .bind(now as i64)
@@ -129,13 +146,13 @@ pub async fn login(
             .header("Content-Type", "application/json")
             .body(Body::from(jwt))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
-    }
-    .await {
+    }.await {
         Ok(resp) => resp,
         Err(status) => status_response(status),
     }
 }
 
+// TODO: check db for session so sessions aren't useless
 pub async fn verify(
     pool: &PgPool,
     headers: &HeaderMap
@@ -159,7 +176,7 @@ pub async fn verify(
     })?;
 
     // jwt lib handles expiration check automatically (sends back a 422 if fucky)
-    sqlx::query("SELECT 1 FROM users WHERE username = $1")
+    query("SELECT 1 FROM users WHERE username = $1")
         .bind(&token_data.claims.sub)
         .fetch_one(pool).await
         .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;

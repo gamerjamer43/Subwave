@@ -1,6 +1,6 @@
 // backend shit
-use sqlx::PgPool;
 use anyhow::Result;
+use sqlx::{PgPool, query};
 
 // filepaths
 use tokio::fs::read_dir;
@@ -14,9 +14,8 @@ use lofty::{
     tag::Accessor
 };
 
-// i'm saving one line (and sanity)
-const UPSERTSONG: &str = include_str!("queries/upsertsong.sql");
-const UPSERTALBUM: &str = include_str!("queries/upsertalbum.sql");
+// upserter
+const UPSERT: &str = include_str!("../queries/upsert.sql");
 
 // helper macros to avoid repeating the same Option to String bullshit
 macro_rules! tag_str {
@@ -67,7 +66,7 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let filename: String = format!("{}", path.file_name().unwrap().to_string_lossy());
 
     // skip reindexing
-    if let Some(_) = sqlx::query("SELECT 1 FROM songs WHERE filename = $1")
+    if let Some(_) = query("SELECT 1 FROM songs WHERE filename = $1")
         .bind(&filename)
         .fetch_optional(pool)
         .await? {
@@ -82,39 +81,20 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let name: String = tag_str!(tag, title, path.file_stem().unwrap().to_string_lossy());
     let artist: String = tag_str!(tag, artist, "Unknown Artist");
     let album: String = tag_str!(tag, album, "Unknown Album");
-    let cover: Option<Vec<u8>> = tag_opt_pic!(tag);
     let duration: i32 = tagged_file.properties().duration().as_secs() as i32;
+    let cover: Option<Vec<u8>> = tag_opt_pic!(tag);
 
-    // this is the LAST place to save lines and time. this could all be one query.
-    // create albums
-    sqlx::query(UPSERTALBUM)
+    // upsert all that info (this shit deals w album and song inserts)
+    query(&UPSERT)
         .bind(&album)
         .bind(&artist)
         .bind(cover.as_deref())
-        .execute(pool).await?;
-
-    // album ids
-    let album_id: i32 = sqlx::query_scalar(
-        "SELECT id FROM albums WHERE name = $1 AND artist = $2"
-    )
-        .bind(&album)
-        .bind(&artist)
-        .fetch_one(pool).await?;
-
-    // ts so fucked. track number is a placeholder zero if not found
-    sqlx::query(UPSERTSONG)
         .bind(&name)
-        .bind(album_id)
-        .bind(0_i32) // placeholder track number when none is available
+
+        // TODO: make track listings actually work
+        .bind(0_i32)
         .bind(duration)
         .bind(&filename)
-        .execute(pool).await?;
-
-    // update incrementally
-    sqlx::query(
-        "UPDATE albums SET songcount = songcount + 1, runtime = runtime + $1 WHERE id = $2;"
-    )
-        .bind(duration).bind(album_id)
         .execute(pool).await?;
 
     println!("Indexed: {} - {} ({})", artist, name, album);

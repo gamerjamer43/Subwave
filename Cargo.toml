@@ -1,19 +1,19 @@
 [package]
-name = "flacend"
-version = "0.1.0"
+name = "Subwave"
+version = "0.0.7"
 edition = "2021"
 
 [dependencies]
 # webserver shit
-tokio = { version = "1.29", features = ["full"] }
-tokio-util = "0.7.16"
-hyper = { version = "0.14", features = ["full"] }
-axum = { version = "0.6", features = ["json"] }
-tower = { version = "0.4", features = ["limit"] }
+tokio = { version = "1.29", default-features = false, features = ["rt-multi-thread", "macros", "fs"] } 
+tokio-util = { version = "0.7.16", default-features = false, features = ["io"] }
+axum = { version = "0.6", features = ["http1", "json", "tokio", "query"] }
+tower = { version = "0.4", default-features = false, features = ["limit"] }
 
 # audio backend (now actually using postgres)
-sqlx = { version = "0.8.6", features = ["postgres", "runtime-tokio-native-tls"] }
-lofty = "0.22.4"
+# using runtime-tokio-rustls added fucking 20 deps. i may add this back but bruh
+sqlx = { version = "0.8.6", default-features = false, features = ["postgres", "runtime-tokio", "macros"] }
+lofty = { version = "0.22.4", default-features = false, features = ["id3v2_compression_support"] }
 
 # anyhow for errors
 anyhow = "1.0.100"
@@ -24,7 +24,6 @@ serde_json = "1.0"
 percent-encoding = "2.3.2"
 
 # auth helpers
-rand_core = { version = "0.6", features = ["getrandom"] }
 argon2 = "0.5"
 chrono = "0.4.42"
 jsonwebtoken = { version = "10.0.0", features = ["rust_crypto"]}

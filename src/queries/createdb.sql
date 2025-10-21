@@ -2,9 +2,14 @@ CREATE TABLE IF NOT EXISTS albums (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     artist TEXT NOT NULL,
+
+    -- TODO: swap from in memory to a ref
     cover BYTEA,
     runtime INTEGER NOT NULL,
-    songcount INTEGER NOT NULL
+    songcount INTEGER NOT NULL,
+
+    -- TODO: gonna replace this with a year key. rereleases need (Year) in the name frn.
+    UNIQUE (name, artist)
 );
 
 CREATE TABLE IF NOT EXISTS songs (

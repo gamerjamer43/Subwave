@@ -1,4 +1,6 @@
 // backend related shit
+use tokio::fs;
+use tokio_util::io::ReaderStream;
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -6,9 +8,10 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use sqlx::{PgPool, Row};
-use tokio::fs;
-use tokio_util::io::ReaderStream;
+use sqlx::{
+    PgPool, Row,
+    query, query_as, query_scalar
+};
 
 // escaping searches
 use percent_encoding::percent_decode_str;
@@ -18,29 +21,15 @@ use std::collections::HashMap;
 use crate::mods::models::{Album, Song};
 
 // login helpers
-use crate::mods::cors::add_cors_headers;
-use crate::mods::login::verify;
-use crate::mods::router::{status_response};
+use crate::api::{
+    cors::add_cors_headers,
+    login::verify,
+    router::{status_response}
+};
 
 // song search helper
-const SEARCHSONG: &str = include_str!("queries/searchsong.sql");
-const SEARCHALBUM: &str = include_str!("queries/searchalbum.sql");
-
-// if no auth, get fucked
-pub async fn auth(
-    pool: &PgPool,
-    req: &Request<Body>
-) -> Option<Response<Body>> {
-    if let Err(status) = verify(pool, req.headers()).await {
-        return Some(
-            Response::builder()
-                .status(status)
-                .body(Body::from("unauthorized"))
-                .unwrap(),
-        );
-    }
-    None
-}
+const SEARCHSONG: &str = include_str!("../queries/searchsong.sql");
+const SEARCHALBUM: &str = include_str!("../queries/searchalbum.sql");
 
 // auth middleware
 pub async fn require_auth<B>(
@@ -60,15 +49,22 @@ pub async fn test(
     State(pool): State<PgPool>, 
     req: Request<Body>
 ) -> Response<Body> {
-    if let Some(resp) = auth(&pool, &req).await {
-        return resp;
-    }
+    let mut resp: Response<Body>;
+    match verify(&pool, req.headers()).await {
+        // ok attach a 200
+        Ok(_) => {
+            resp = Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"status":"ok"}"#))
+                .unwrap();
+        }
 
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(r#"{"status":"ok"}"#))
-        .unwrap()
+        // (left the trailing comma cuz idk if leaving it off is gonna return)
+        Err(status) => resp = status_response(status),
+    }
+    add_cors_headers(&mut resp);
+    resp
 }
 
 // file service
@@ -140,7 +136,7 @@ pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<Str
     let pattern = format!("%{}%", search_term);
 
     // query for songs
-    let query = match sqlx::query(SEARCHSONG)
+    let query = match query(SEARCHSONG)
         .bind(pattern.as_str())
         .fetch_all(&pool).await {
             Ok(q) => q,
@@ -166,11 +162,12 @@ pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<Str
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    Response::builder()
+    let mut resp = Response::builder()
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::ACCESS_CONTROL_ALLOW_ORIGIN, "*")
         .body(Body::from(json))
-        .unwrap()
+        .unwrap();
+    add_cors_headers(&mut resp);
+    resp
 }
 
 // cover search
@@ -179,7 +176,7 @@ pub async fn cover(Path(id): Path<i64>, State(pool): State<PgPool>) -> Response<
     let song_id = id;
 
     // find cover with that id
-    let cover: Option<Vec<u8>> = match sqlx::query_scalar(
+    let cover: Option<Vec<u8>> = match query_scalar(
         "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1",
     ).bind(song_id)
     .fetch_one(&pool).await{
@@ -193,7 +190,11 @@ pub async fn cover(Path(id): Path<i64>, State(pool): State<PgPool>) -> Response<
         None => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    Response::builder().body(Body::from(data)).unwrap()
+    let mut resp = Response::builder()
+        .body(Body::from(data))
+        .unwrap();
+    add_cors_headers(&mut resp);
+    resp
 }
 
 // album search
@@ -202,7 +203,7 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
     let album_id = album_id;
 
     // album metadata
-    let row = match sqlx::query(
+    let row = match query(
         "SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = $1",
     )
         .bind(album_id)
@@ -212,7 +213,7 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         };
 
     // fetch songs
-    let songs: Vec<Song> = match sqlx::query_as::<_, Song>(SEARCHALBUM)
+    let songs: Vec<Song> = match query_as::<_, Song>(SEARCHALBUM)
         .bind(album_id)
         .fetch_all(&pool).await {
             Ok(s) => s,
@@ -235,5 +236,9 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    Response::builder().body(Body::from(json)).unwrap()
+    let mut resp = Response::builder()
+        .body(Body::from(json))
+        .unwrap();
+    add_cors_headers(&mut resp);
+    resp
 }

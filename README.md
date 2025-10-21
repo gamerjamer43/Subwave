@@ -1,15 +1,14 @@
 <h1 align="center"> Subwave 🌊 </h1>
 
 <p align="center"><img src="https://github.com/user-attachments/assets/978945d3-da0f-4224-ae93-c7c6cf880fce" width="250"></p>
-<h3 align="center">Raw speed, wherever you may be. Raw compatibility, whatever you may be on. It's the new wave.</h3>
-<p align="center"><em>This project goes hand in hand with <a href="https://github.com/gamerjamer43/Hertzonic">Hertzonic</a>. Check it out!</em></p>
-
 <p align="center">
-    <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-blue.svg" />
+    <img alt="Version" src="https://img.shields.io/badge/version-0.0.1%20indev-blue.svg" />
     <img alt="Rust" src="https://img.shields.io/badge/rust-1.70+-grey.svg" />
     <img alt="Postgres" src="https://img.shields.io/badge/db-postgres-316192.svg" />
     <img alt="License" src="https://img.shields.io/badge/license-private-red.svg" />
 </p>
+<p align="center"><b>Raw speed, for wherever you might be. Raw compatibility, on whatever you might use. One command, two install, and you're good. It's the new wave.</b></p>
+<p align="center"><em>This project goes hand in hand with <a href="https://github.com/gamerjamer43/Hertzonic">Hertzonic</a>. Check it out!</em></p>
 
 ## Table of Contents
 
@@ -30,7 +29,7 @@
 
 ## Features
 
-- Built on **Hyper** for a smoking fast HTTP backend, and **sqlx** as an absolute unit to drive **PostgreSQL** on it's back. 
+- Built on top of **Hyper** using **Tower** and **Axum** for a smoking fast HTTP backend, and **sqlx** as an absolute unit to drive **PostgreSQL** on it's back. 
 - Literally every single operation is optimized. Signups take about 50ms, starting a music stream takes less than a millisecond, **EVERYTHING** is fine-tuned to be as fast (albeit still security tough and feature robust) as it can be.
 - Deals with all the login auth bullshit for you! A header is provided on login, pass it with your requests to be allowed to access shit. Session tokens expire on server restart or after 24 hours, so don't hardcode it.
 - Pen-tested, stress-tested, and idiot-tested. Whether it's 20 songs or 200 thousand, you will have zero problems with hosting this publicly, whether it be from a lack of attention or a malicious outside source.
@@ -108,8 +107,14 @@ I tried to design this super fuckin simply, the primary schema file lives at `qu
 
 Note: The project used SQLite originally; schema and queries are adjusted for Postgres.
 
-## Development notes
+## Development logs
 
+#### Known offenses:
+- I need to do some more package optimization, but I'm modeling right now. I am sure I can chop down from 394 dependencies. The entire cargo build environment is 1.5GB right now...
+- Stress testing is after I get covers out of the DB. This should be done by 0.0.9.
+- 
+
+#### Notes:
 - `scanner::scan` indexes files under `./static/` and inserts metadata into the DB; if you fuck around with the server make sure it gets ran, either on startup or via a maintenance task.
 - Sessions are the one thing that isn't persistent. It uses an in-memory `SessionStore` (regenning on startup) with a 24 hour TTL. If you want session persistence, jack the values up and set an environment variable for the JWT key. The way I have it is just decently secure.
 - If you fuck around with anything, adding proper migrations (`sqlx-cli` or similar) might help. The `createdb.sql` file is cool and all but I needed to mess around a lot.
@@ -149,7 +154,7 @@ This is meant to be a competitor to existing Subsonic forks. I've heard a lot of
 
 ## Documentation
 
-I have not started on this, because as of right now there's only ~650 lines of rust driving this whole thing. Come back later for more!
+I have not started on this, because as of right now there's only ~500 significant lines of rust driving this whole thing. Come back later for more!
 
 ## Contributing
 
@@ -158,7 +163,7 @@ PRs are always welcome, but keep your changes small and focused on one specific 
 ## Acknowledgments
 
 ### Built with ❤️ using:
-- [Hyper](https://hyper.rs/) - Quite possibly my favorite HTTP client for Rust. 
+- [Axum](https://github.com/tokio-rs/axum) - Quite possibly my favorite HTTP client for Rust, Hyper, has a way higher level version, for way more control. I like Axum a lot.
 - [sqlx](https://github.com/launchbadge/sqlx) - No contest. The BEST SQL driver. Migrating to Postgres was super easy.
 - [Argon2](https://github.com/sru-systems/rust-argon2) - Password hashing done right. Literally industry standard.
 - [PostgreSQL](https://postgresql.org) - Battle tested. The industry standard. If you're hosting for multiple people, or hosting a shitload of songs, this DB

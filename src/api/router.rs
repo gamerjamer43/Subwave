@@ -1,5 +1,5 @@
 // backend related shit
-use sqlx::PgPool;
+use sqlx::{PgPool, Pool, Postgres};
 use axum::{
     middleware::from_fn_with_state, 
     routing::{get, post},
@@ -9,25 +9,30 @@ use axum::{
 };
 
 // my routes
-use crate::mods::login::{login, signup};
-use crate::mods::endpoints::{
-    album, cover, search, 
-    serve, test, 
-    require_auth
+use crate::api::{
+    login::{login, signup},
+    cors::add_cors_headers,
+    endpoints::{
+        album, cover, search, 
+        serve, test, 
+        require_auth
+    }
 };
 
 pub fn status_response(status: StatusCode) -> Response<Body> {
-    Response::builder()
+    let mut resp = Response::builder()
         .status(status)
         .body(Body::from(status
             .canonical_reason()
             .unwrap_or("Error")
-        )).unwrap()
+        )).unwrap();
+    add_cors_headers(&mut resp);
+    resp
 }
 
 // routes urls to proper path (axum!!!! yay!!!)
 pub fn route(pool: PgPool) -> Router {
-    let gated: Router<sqlx::Pool<sqlx::Postgres>> = Router::new()
+    let gated: Router<Pool<Postgres>> = Router::new()
         .route("/api/test", get(test))
         .route("/api/search", get(search))
         .route("/api/cover/*rest", get(cover))
