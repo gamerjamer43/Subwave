@@ -7,8 +7,9 @@ edition = "2021"
 # webserver shit
 tokio = { version = "1.29", default-features = false, features = ["rt-multi-thread", "macros", "fs"] } 
 tokio-util = { version = "0.7.16", default-features = false, features = ["io"] }
-axum = { version = "0.6", features = ["http1", "json", "query"] }
+axum = { version = "0.8", features = ["http1", "json", "query"] }
 tower = { version = "0.4", default-features = false, features = ["limit"] }
+tower_governor = "0.8"
 
 # audio db (now actually using postgres)
 # using runtime-tokio-rustls added fucking 20 deps. i may add this back but bruh

@@ -18,16 +18,15 @@ use std::{
 };
 
 // switching this jawn over to axum
+use tokio::net::TcpListener;
 use tower::limit::RateLimitLayer;
 use axum::{
-    body::{boxed, BoxBody}, 
+    body::Body,
     extract::connect_info::ConnectInfo, 
     middleware::{from_fn, Next}, 
-    Router, Server,
-    http::{
-        Method, Request, 
-        Response
-    }
+    response::Response,
+    http::{Method, Request},
+    Router, serve
 };
 
 // sqlx is fire, but a lil heavyweight. if you want to lighten deps, i reccomend Diesel
@@ -65,14 +64,18 @@ async fn main() {
         .layer(RateLimitLayer::new(20, Duration::from_secs(1)))
         .service(app.into_make_service_with_connect_info::<SocketAddr>());
 
-    Server::bind(&addr)
-        .serve(make_service)
-        .await.unwrap();
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind TCP listener");
+
+    if let Err(err) = serve(listener, make_service).await {
+        eprintln!("Server error: {err}");
+    }
 }
 
 // general sendback handler
-async fn handle_request<B>(req: Request<B>, next: Next<B>) 
--> Result<Response<BoxBody>, Infallible> {
+async fn handle_request(req: Request<Body>, next: Next) 
+-> Result<Response, Infallible> {
     let start: Instant = Instant::now();
     let path: String = req.uri().path().to_owned();
     let method: &Method = req.method();
@@ -84,7 +87,7 @@ async fn handle_request<B>(req: Request<B>, next: Next<B>)
 
     // options preflight
     if method == Method::OPTIONS {
-        return Ok(cors_preflight().map(boxed));
+        return Ok(cors_preflight());
     }
 
     // route to api

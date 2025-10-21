@@ -4,7 +4,7 @@ use tokio_util::io::ReaderStream;
 use axum::{
     body::Body, middleware::Next,
     extract::{Path, Query, State},
-    http::{header, Request, StatusCode},
+    http::{header, Request as HttpRequest, StatusCode},
     response::{IntoResponse, Response},
 };
 
@@ -29,12 +29,11 @@ use crate::{
 };
 
 // auth middleware
-pub async fn require_auth<B>(
+pub async fn require_auth(
     State(pool): State<PgPool>,
-    req: Request<B>,
-    next: Next<B>,
-) -> Response
-where B: Send + 'static, {
+    req: HttpRequest<Body>,
+    next: Next,
+) -> Response {
     match verify(&pool, req.headers()).await {
         Ok(_) => next.run(req).await,
         Err(status) => (status, "unauthorized").into_response(),
@@ -44,7 +43,7 @@ where B: Send + 'static, {
 // basic token status check
 pub async fn test(
     State(pool): State<PgPool>, 
-    req: Request<Body>
+    req: HttpRequest<Body>
 ) -> Response<Body> {
     let mut resp: Response<Body>;
     match verify(&pool, req.headers()).await {
@@ -91,7 +90,7 @@ pub async fn serve(Path(path): Path<String>) -> Response<Body> {
     };
 
     // wrap file in a streaming body
-    let body = Body::wrap_stream(ReaderStream::new(file));
+    let body = Body::from_stream(ReaderStream::new(file));
 
     // determine content type based on file extension
     let content_type = match filepath.rsplit('.').next() {

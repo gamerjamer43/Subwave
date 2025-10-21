@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 // backend related shit
 use sqlx::{PgPool, Pool, Postgres};
 use axum::{
@@ -7,6 +9,7 @@ use axum::{
     body::Body,
     Router
 };
+use tower_governor::{governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer};
 
 // my routes
 use crate::api::{
@@ -26,12 +29,26 @@ pub fn status_response(status: StatusCode) -> Response<Body> {
             .canonical_reason()
             .unwrap_or("Error")
         )).unwrap();
+
     add_cors_headers(&mut resp);
     resp
 }
 
 // routes urls to proper path (axum!!!! yay!!!)
 pub fn route(pool: PgPool) -> Router {
+    // default to 20 per second (note this builds EVERY TIME something is routed... i need to figure this shit out.)
+    let governor_config = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(1)
+            .burst_size(20)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid governor config"),
+    );
+
+    // build a governor layer
+    let governor_layer = GovernorLayer::<SmartIpKeyExtractor, _, Body>::new(governor_config);
+
     let gated: Router<Pool<Postgres>> = Router::new()
         .route("/api/test", get(test))
         .route("/api/search", get(search))
@@ -45,6 +62,7 @@ pub fn route(pool: PgPool) -> Router {
         .route("/api/signup", post(signup))
         .route("/api/login", post(login))
         .merge(gated)
+        .layer(governor_layer)
 
         // otherwise 404 that shit (will add other routes besides file serving and the api potentially)
         .fallback(|| async { status_response(StatusCode::NOT_FOUND) })
