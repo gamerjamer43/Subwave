@@ -46,8 +46,8 @@ static ARGON2: std::sync::LazyLock<Argon2<'static>> = LazyLock::new(|| {
 });
 
 // jwt secret key (32 byte token that changes each time you run)
-// TODO: add set tokens so session strores arent useless
-const JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
+// TODO: add set tokens so session strores arent useless.
+static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     let mut secret = [0u8; 32];
     OsRng.fill_bytes(&mut secret);
     secret.to_vec()

@@ -10,22 +10,27 @@ use crate::{
 };
 
 use dotenvy::dotenv;
+use tower::ServiceBuilder;
 use std::{
     convert::Infallible, 
     env::var, net::SocketAddr, 
-    cell::LazyCell, time::Instant
+    cell::LazyCell, time::{Duration, Instant}
 };
 
 // switching this jawn over to axum
-// use tower::limit::RateLimitLayer;
+use tower::limit::RateLimitLayer;
 use axum::{
-    body::{boxed, BoxBody}, Router, Server,
-    extract::connect_info::ConnectInfo,
-    middleware::{from_fn, Next},
-    http::{Method, Request, Response},
+    body::{boxed, BoxBody}, 
+    extract::connect_info::ConnectInfo, 
+    middleware::{from_fn, Next}, 
+    Router, Server,
+    http::{
+        Method, Request, 
+        Response
+    }
 };
 
-// sqlx is fire use it even if u change anything
+// sqlx is fire, but a lil heavyweight. if you want to lighten deps, i reccomend Diesel
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
 // address is hardcoded frn (i should prolly delegate that to env, but it would da just be port)
@@ -51,12 +56,17 @@ async fn main() {
     scan(&pool, "./static").await
         .expect("Failed to index songs.");
 
-    // bind router to server, and add our request layer
+    // base router with request logging/cors middleware
     let app: Router = route(pool)
         .layer(from_fn(handle_request));
 
+    // hyper/tower/axum stack is so fucking cool. adjust if this is giving you a hard time
+    let make_service = ServiceBuilder::new()
+        .layer(RateLimitLayer::new(20, Duration::from_secs(1)))
+        .service(app.into_make_service_with_connect_info::<SocketAddr>());
+
     Server::bind(&addr)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .serve(make_service)
         .await.unwrap();
 }
 
