@@ -5,6 +5,7 @@ use axum::{
     http::{header, Request as HttpRequest, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
+    Json,
 };
 use tokio::fs;
 use tokio_util::io::ReaderStream;
@@ -14,8 +15,7 @@ use sqlx::{query, query_file_as, query_scalar, PgPool};
 
 // escaping searches
 use percent_encoding::percent_decode_str;
-use serde_json::to_string;
-use std::{borrow::Cow, collections::HashMap};
+use std::collections::HashMap;
 
 // login helpers
 use crate::{
@@ -122,103 +122,86 @@ pub async fn search(
     State(pool): State<PgPool>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response<Body> {
-    // get raw query
-    let search: String = params.get("q").cloned().unwrap_or_default();
-
-    // build search pattern
-    let search: Cow<'_, str> = percent_decode_str(&search).decode_utf8_lossy();
-    let search_term: &str = search.trim_matches('"').trim();
-    let pattern: String = format!("%{}%", search_term);
+    // this ugly ass
+    let search = params
+        .get("q")
+        .map(|s| percent_decode_str(s).decode_utf8_lossy())
+        .map(|s| s.trim_matches('"').trim().to_string())
+        .unwrap_or_default();
 
     // query for songs
-    let songs: Vec<Song> = match query_file_as!(Song, "queries/searchsong.sql", pattern.as_str())
+    let pattern = format!("%{search}%");
+    let result = sqlx::query_file_as!(Song, "queries/searchsong.sql", pattern)
         .fetch_all(&pool)
-        .await
-    {
-        Ok(s) => s,
-        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-    };
+        .await;
 
-    // serialize and shoot er back
-    let json = match to_string(&songs) {
-        Ok(j) => j,
-        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-    };
+    match result {
+        Ok(songs) => {
+            let mut response = Json(songs).into_response();
+            add_cors_headers(&mut response);
+            response
+        }
 
-    let mut resp = Response::builder()
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(Body::from(json))
-        .unwrap();
-    add_cors_headers(&mut resp);
-    resp
+        Err(e) => {
+            eprintln!("Database error in search(): {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "query failed").into_response()
+        }
+    }
 }
 
 // cover search
-pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> Response<Body> {
-    // parse album id
-    let song_id: i32 = id;
-
-    // find cover with that id
-    let cover: Option<String> = match query_scalar!(
-        "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1",
-        song_id
+pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> impl IntoResponse {
+    // look up cover path
+    let cover: Option<String> = query_scalar!(
+        r#"SELECT a.cover
+           FROM songs s
+           JOIN albums a ON s.album_id = a.id
+           WHERE s.id = $1"#,
+        id
     )
     .fetch_one(&pool)
     .await
-    {
-        Ok(c) => c,
-        Err(_) => return status_response(StatusCode::NOT_FOUND),
+    .ok()
+    .flatten();
+
+    // invalid / missing cover
+    let Some(data) = cover.filter(|c| !c.is_empty() && !c.contains("..")) else {
+        return status_response(StatusCode::NOT_FOUND);
     };
 
-    // return that hoe (or error if magic has happened. you prolly deleted a cover)
-    let data = match cover {
-        Some(d) if !d.is_empty() => d,
-        _ => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-
-    if data.contains("..") {
-        return status_response(StatusCode::FORBIDDEN);
-    }
-
+    // open file
     let path = std::path::Path::new("./static").join(&data);
     let file = match fs::File::open(&path).await {
         Ok(f) => f,
         Err(_) => return status_response(StatusCode::NOT_FOUND),
     };
 
+    // gather metadata
     let metadata = match file.metadata().await {
         Ok(m) => m,
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    let content_type = match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
+    // determine mime
+    let content_type = match path.extension().and_then(|e| e.to_str()).unwrap_or("") {
         "png" => "image/png",
         _ => "image/jpeg",
     };
 
-    let body = Body::from_stream(ReaderStream::new(file));
-
+    // stream body
     let mut resp = Response::builder()
         .header(header::CONTENT_TYPE, content_type)
         .header("Content-Length", metadata.len())
         .header("Accept-Ranges", "bytes")
-        .body(body)
+        .body(Body::from_stream(ReaderStream::new(file)))
         .unwrap();
+
     add_cors_headers(&mut resp);
     resp
 }
 
 // album search
-pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Response<Body> {
-    // album id (yoinked from above)
-    let album_id: i32 = album_id;
-
+pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> impl IntoResponse {
     // album metadata
     let row = match query!(
         "SELECT id, name, artist, cover, runtime, songcount FROM albums WHERE id = $1",
@@ -231,8 +214,8 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         Err(_) => return status_response(StatusCode::NOT_FOUND),
     };
 
-    // fetch songs
-    let songs: Vec<Song> = match query_file_as!(Song, "queries/searchalbum.sql", album_id)
+    // songs
+    let songs = match query_file_as!(Song, "queries/searchalbum.sql", album_id)
         .fetch_all(&pool)
         .await
     {
@@ -240,8 +223,8 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    // build into one big fat album
-    let resp = Album {
+    // build final album response
+    let album = Album {
         id: row.id,
         name: row.name,
         artist: row.artist,
@@ -250,13 +233,11 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         songs,
     };
 
-    // serialize and send
-    let json = match to_string(&resp) {
-        Ok(j) => j,
-        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-    };
+    let mut resp = Response::builder()
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&album).unwrap()))
+        .unwrap();
 
-    let mut resp = Response::builder().body(Body::from(json)).unwrap();
     add_cors_headers(&mut resp);
     resp
 }

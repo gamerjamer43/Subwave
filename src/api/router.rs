@@ -10,10 +10,8 @@ use axum::{
 use governor::middleware::NoOpMiddleware;
 use sqlx::{PgPool, Pool, Postgres};
 use tower_governor::{
-    governor::{GovernorConfigBuilder},
-    key_extractor::SmartIpKeyExtractor,
-    GovernorLayer,
-};  
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+};
 
 // my routes
 use crate::api::{
@@ -23,19 +21,18 @@ use crate::api::{
 };
 
 // this is what does the rate limiting
-pub static GOVERNOR_LAYER: LazyLock<
-GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware, Body>
-> = LazyLock::new(|| {
-    let config = Arc::new(
-        GovernorConfigBuilder::default()
-            .per_second(1)
-            .burst_size(20)
-            .key_extractor(SmartIpKeyExtractor)
-            .finish()
-            .expect("valid governor config"),
-    );
-    GovernorLayer::new(config)
-});
+pub static GOVERNOR_LAYER: LazyLock<GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware, Body>> =
+    LazyLock::new(|| {
+        let config = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(1)
+                .burst_size(30)
+                .key_extractor(SmartIpKeyExtractor)
+                .finish()
+                .expect("valid governor config"),
+        );
+        GovernorLayer::new(config)
+    });
 
 /// helper response
 pub fn status_response(status: StatusCode) -> Response<Body> {
