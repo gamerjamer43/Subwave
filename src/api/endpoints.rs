@@ -31,11 +31,7 @@ pub async fn require_auth(
 ) -> Response {
     match verify(&pool, req.headers()).await {
         Ok(_) => next.run(req).await,
-        Err(status) => {
-            let mut resp = (status, "unauthorized").into_response();
-            add_cors_headers(&mut resp);
-            resp
-        }
+        Err(status) => (status, "unauthorized").into_response(),
     }
 }
 
@@ -176,11 +172,44 @@ pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> Response<
 
     // return that hoe (or error if magic has happened. you prolly deleted a cover)
     let data = match cover {
-        Some(d) => d,
-        None => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
+        Some(d) if !d.is_empty() => d,
+        _ => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    let mut resp = Response::builder().body(Body::from(data)).unwrap();
+    if data.contains("..") {
+        return status_response(StatusCode::FORBIDDEN);
+    }
+
+    let path = std::path::Path::new("./static").join(&data);
+    let file = match fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return status_response(StatusCode::NOT_FOUND),
+    };
+
+    let metadata = match file.metadata().await {
+        Ok(m) => m,
+        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
+    };
+
+    let content_type = match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "image/png",
+        _ => "image/jpeg",
+    };
+
+    let body = Body::from_stream(ReaderStream::new(file));
+
+    let mut resp = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header("Content-Length", metadata.len())
+        .header("Accept-Ranges", "bytes")
+        .body(body)
+        .unwrap();
     add_cors_headers(&mut resp);
     resp
 }

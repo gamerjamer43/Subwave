@@ -78,7 +78,7 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let album: String = tag_str!(tag, album, "Unknown Album");
     let duration: i32 = tagged_file.properties().duration().as_secs() as i32;
     let cover: Option<String> = match tag.and_then(|t: &Tag| t.pictures().first()) {
-        Some(picture) => save_cover_image(&artist, &album, picture).await?,
+        Some(picture) => save_cover_image(&filename, picture).await?,
         None => None,
     };
 
@@ -101,25 +101,16 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     Ok(())
 }
 
-async fn save_cover_image(artist: &str, album: &str, picture: &Picture) -> Result<Option<String>> {
-    // ensure cover dir is made
+async fn save_cover_image(filename: &str, picture: &Picture) -> Result<Option<String>> {
     create_dir_all("./static/cover").await?;
 
-    // match to png or jpg (i'll do others later but legit 99% of covers are on png or jpg)
+    // (i'll do others later but legit 99% of covers are on png or jpg)
     let ext = match picture.mime_type().map(|m| m.as_str()) {
         Some("image/png") => "png",
         _ => "jpg",
     };
 
-    // using slugging frn just b/c i'm not spending more time on this lol
-    let slug = |s: &str| {
-        s.chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
-            .collect::<String>()
-    };
-
-    // slug filename and write
-    let filename = format!("cover/{}-{}.{}", slug(artist), slug(album), ext);
+    let filename = format!("cover/{}.{}", filename, ext);
     let full_path = Path::new("./static").join(&filename);
     if metadata(&full_path).await.is_err() {
         write(full_path, picture.data()).await?;
