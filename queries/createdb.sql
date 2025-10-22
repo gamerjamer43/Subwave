@@ -3,7 +3,6 @@ CREATE TABLE IF NOT EXISTS albums (
     name TEXT NOT NULL,
     artist TEXT NOT NULL,
 
-    -- TODO: swap from in memory to a ref
     cover TEXT,
     runtime INTEGER NOT NULL,
     songcount INTEGER NOT NULL,
