@@ -1,16 +1,13 @@
 use axum::{
     body::Body,
-    response::Response,
-
     // header shit
     http::{
-        HeaderValue,
         header::{
-            ACCESS_CONTROL_ALLOW_HEADERS,
-            ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN,
+            ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
         },
+        HeaderValue,
     },
+    response::Response,
 };
 
 // any response gets these headers

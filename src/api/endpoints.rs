@@ -1,31 +1,26 @@
 // backend related shit
-use tokio::fs;
-use tokio_util::io::ReaderStream;
 use axum::{
-    body::Body, middleware::Next,
+    body::Body,
     extract::{Path, Query, State},
     http::{header, Request as HttpRequest, StatusCode},
+    middleware::Next,
     response::{IntoResponse, Response},
 };
+use tokio::fs;
+use tokio_util::io::ReaderStream;
 
 // dbing
-use sqlx::{PgPool, query, query_file_as, query_scalar};
+use sqlx::{query, query_file_as, query_scalar, PgPool};
 
 // escaping searches
 use percent_encoding::percent_decode_str;
-use std::{borrow::Cow, collections::HashMap};
 use serde_json::to_string;
+use std::{borrow::Cow, collections::HashMap};
 
 // login helpers
 use crate::{
-    api::{
-        cors::add_cors_headers,
-        login::verify,
-        router::{status_response}
-    },
-    mods::{
-        models::{Album, Song}
-    }
+    api::{cors::add_cors_headers, login::verify, router::status_response},
+    mods::models::{Album, Song},
 };
 
 // auth middleware
@@ -36,15 +31,16 @@ pub async fn require_auth(
 ) -> Response {
     match verify(&pool, req.headers()).await {
         Ok(_) => next.run(req).await,
-        Err(status) => (status, "unauthorized").into_response(),
+        Err(status) => {
+            let mut resp = (status, "unauthorized").into_response();
+            add_cors_headers(&mut resp);
+            resp
+        }
     }
 }
 
 // basic token status check
-pub async fn test(
-    State(pool): State<PgPool>, 
-    req: HttpRequest<Body>
-) -> Response<Body> {
+pub async fn test(State(pool): State<PgPool>, req: HttpRequest<Body>) -> Response<Body> {
     let mut resp: Response<Body>;
     match verify(&pool, req.headers()).await {
         // ok attach a 200
@@ -68,7 +64,11 @@ pub async fn serve(Path(path): Path<String>) -> Response<Body> {
     // strip /file/ prefix from the path, index.html if none (which i havent added)
     // TODO: add escaping so we can't jack the db. idk if this is vulnerable or not but we'll look later
     let raw = percent_decode_str(&path).decode_utf8_lossy().to_string();
-    let filepath = if raw.is_empty() { "index.html".to_string() } else { raw };
+    let filepath = if raw.is_empty() {
+        "index.html".to_string()
+    } else {
+        raw
+    };
 
     // prevent directory traversal
     // TODO: make this more robust this shit is not guarding
@@ -122,7 +122,10 @@ pub async fn serve(Path(path): Path<String>) -> Response<Body> {
 }
 
 // song search
-pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<String, String>>) -> Response<Body> {
+pub async fn search(
+    State(pool): State<PgPool>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response<Body> {
     // get raw query
     let search: String = params.get("q").cloned().unwrap_or_default();
 
@@ -133,10 +136,12 @@ pub async fn search(State(pool): State<PgPool>, Query(params): Query<HashMap<Str
 
     // query for songs
     let songs: Vec<Song> = match query_file_as!(Song, "queries/searchsong.sql", pattern.as_str())
-        .fetch_all(&pool).await {
-            Ok(s) => s,
-            Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-        };
+        .fetch_all(&pool)
+        .await
+    {
+        Ok(s) => s,
+        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
+    };
 
     // serialize and shoot er back
     let json = match to_string(&songs) {
@@ -158,11 +163,13 @@ pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> Response<
     let song_id: i32 = id;
 
     // find cover with that id
-    let cover: Option<Vec<u8>> = match query_scalar!(
+    let cover: Option<String> = match query_scalar!(
         "SELECT a.cover FROM songs s JOIN albums a ON s.album_id = a.id WHERE s.id = $1",
         song_id
-    ).fetch_one(&pool)
-    .await {
+    )
+    .fetch_one(&pool)
+    .await
+    {
         Ok(c) => c,
         Err(_) => return status_response(StatusCode::NOT_FOUND),
     };
@@ -173,9 +180,7 @@ pub async fn cover(Path(id): Path<i32>, State(pool): State<PgPool>) -> Response<
         None => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    let mut resp = Response::builder()
-        .body(Body::from(data))
-        .unwrap();
+    let mut resp = Response::builder().body(Body::from(data)).unwrap();
     add_cors_headers(&mut resp);
     resp
 }
@@ -191,17 +196,20 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         album_id
     )
     .fetch_one(&pool)
-    .await {
+    .await
+    {
         Ok(r) => r,
         Err(_) => return status_response(StatusCode::NOT_FOUND),
     };
 
     // fetch songs
     let songs: Vec<Song> = match query_file_as!(Song, "queries/searchalbum.sql", album_id)
-        .fetch_all(&pool).await {
-            Ok(s) => s,
-            Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
-        };
+        .fetch_all(&pool)
+        .await
+    {
+        Ok(s) => s,
+        Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
+    };
 
     // build into one big fat album
     let resp = Album {
@@ -219,9 +227,7 @@ pub async fn album(Path(album_id): Path<i32>, State(pool): State<PgPool>) -> Res
         Err(_) => return status_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
 
-    let mut resp = Response::builder()
-        .body(Body::from(json))
-        .unwrap();
+    let mut resp = Response::builder().body(Body::from(json)).unwrap();
     add_cors_headers(&mut resp);
     resp
 }

@@ -12,7 +12,7 @@ pub struct Song {
     pub album: String,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cover: Option<Vec<u8>>,
+    pub cover: Option<String>,
 
     // file info
     pub duration: i32,

@@ -3,7 +3,7 @@ SELECT
     s.name AS name,
     a.artist AS artist,
     a.name AS album,
-    NULL::bytea AS "cover?",
+    NULL::text AS "cover?",
     s.duration AS duration,
     s.filename AS filename
 FROM songs s

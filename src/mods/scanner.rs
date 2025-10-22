@@ -1,17 +1,18 @@
 // backend shit
 use anyhow::Result;
-use sqlx::{PgPool, query_file, query_scalar};
+use sqlx::{query_file, query_scalar, PgPool};
 
 // filepaths
-use tokio::fs::read_dir;
 use std::path::{Path, PathBuf};
+use tokio::fs::{create_dir_all, metadata, read_dir, write};
 
 // metadata helpers
 use lofty::{
     file::TaggedFileExt,
-    prelude::AudioFile, 
-    probe::Probe, 
-    tag::Accessor
+    picture::Picture,
+    prelude::AudioFile,
+    probe::Probe,
+    tag::{Accessor, Tag},
 };
 
 // helper macros to avoid repeating the same Option to String bullshit
@@ -19,12 +20,6 @@ macro_rules! tag_str {
     ($tag:expr, $meth:ident, $default:expr) => {
         $tag.and_then(|t| t.$meth().map(|s| s.to_string()))
             .unwrap_or_else(|| $default.to_string())
-    };
-}
-
-macro_rules! tag_opt_pic {
-    ($tag:expr) => {
-        $tag.and_then(|t| t.pictures().first().map(|p| p.data().to_vec()))
     };
 }
 
@@ -63,43 +58,72 @@ async fn index(pool: &PgPool, path: &Path) -> Result<()> {
     let filename: String = format!("{}", path.file_name().unwrap().to_string_lossy());
 
     // skip reindexing
-    if query_scalar!(
-        "SELECT 1::int FROM songs WHERE filename = $1",
-        filename
-    )
+    if query_scalar!("SELECT 1::int FROM songs WHERE filename = $1", filename)
         .fetch_optional(pool)
         .await?
-        .is_some() {
-            return Ok(());
-        }
+        .is_some()
+    {
+        return Ok(());
+    }
 
     // open file using a probe, get its tags or the first one (potentially even none) if we don't have it
     let tagged_file = Probe::open(path)?.read()?;
-    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
 
     // all this shit is data. there's catches for the cases where none is provided as well
     let name: String = tag_str!(tag, title, path.file_stem().unwrap().to_string_lossy());
     let artist: String = tag_str!(tag, artist, "Unknown Artist");
     let album: String = tag_str!(tag, album, "Unknown Album");
     let duration: i32 = tagged_file.properties().duration().as_secs() as i32;
-    let cover: Option<Vec<u8>> = tag_opt_pic!(tag);
+    let cover: Option<String> = match tag.and_then(|t: &Tag| t.pictures().first()) {
+        Some(picture) => save_cover_image(&artist, &album, picture).await?,
+        None => None,
+    };
 
     // upsert all that info (this shit deals w album and song inserts)
     query_file!(
         "queries/upsert.sql",
         album,
         artist,
-        cover.as_deref(),
+        cover,
         name,
-
         // TODO: make track listings actually work
         0_i32,
         duration,
         filename
     )
-        .execute(pool)
-        .await?;
+    .execute(pool)
+    .await?;
 
     println!("Indexed: {} - {} ({})", artist, name, album);
     Ok(())
+}
+
+async fn save_cover_image(artist: &str, album: &str, picture: &Picture) -> Result<Option<String>> {
+    // ensure cover dir is made
+    create_dir_all("./static/cover").await?;
+
+    // match to png or jpg (i'll do others later but legit 99% of covers are on png or jpg)
+    let ext = match picture.mime_type().map(|m| m.as_str()) {
+        Some("image/png") => "png",
+        _ => "jpg",
+    };
+
+    // using slugging frn just b/c i'm not spending more time on this lol
+    let slug = |s: &str| {
+        s.chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect::<String>()
+    };
+
+    // slug filename and write
+    let filename = format!("cover/{}-{}.{}", slug(artist), slug(album), ext);
+    let full_path = Path::new("./static").join(&filename);
+    if metadata(&full_path).await.is_err() {
+        write(full_path, picture.data()).await?;
+    }
+
+    Ok(Some(filename))
 }

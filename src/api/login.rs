@@ -1,36 +1,31 @@
 use crate::{
+    api::router::status_response,
     mods::models::{AuthRequest, Claims},
-    api::{router::status_response}
 };
 
 // TODO: potentially migrate off sqlx. it's quite heavy
-use sqlx::{PgPool, query, query_file, query_scalar};
+use sqlx::{query, query_file, query_scalar, PgPool};
 
 // axum high level server
 use axum::{
     body::Body,
-    response::Response,
     extract::{Json, State},
     http::{HeaderMap, StatusCode},
+    response::Response,
 };
 
 // argon 2 hashing
 use argon2::{
     password_hash::{
-        PasswordHash, SaltString, 
-        rand_core::{OsRng, RngCore}
+        rand_core::{OsRng, RngCore},
+        PasswordHash, SaltString,
     },
-    Algorithm, Argon2, Version, Params, 
-    PasswordHasher, PasswordVerifier
+    Algorithm, Argon2, Params, PasswordHasher, PasswordVerifier, Version,
 };
 
 // jwt helpers
 use chrono::Utc;
-use jsonwebtoken::{
-    decode, encode,
-    DecodingKey, EncodingKey, 
-    Header, Validation
-};
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 
 // doing this w lazy evaluation so i only have to do this once. fuck you rust!!! you have brought me so much joy and so much pain
 use std::sync::LazyLock;
@@ -40,8 +35,7 @@ static ARGON2: std::sync::LazyLock<Argon2<'static>> = LazyLock::new(|| {
     Argon2::new(
         Algorithm::Argon2id,
         Version::V0x13,
-        Params::new(8000, 2, 1, None)
-            .expect("valid argon2 params"),
+        Params::new(8000, 2, 1, None).expect("valid argon2 params"),
     )
 });
 
@@ -53,22 +47,20 @@ static JWT_SECRET: LazyLock<Vec<u8>> = LazyLock::new(|| {
     secret.to_vec()
 });
 
-pub async fn signup(
-    State(pool): State<PgPool>,
-    Json(req): Json<AuthRequest>,
-) -> Response<Body> {
+pub async fn signup(State(pool): State<PgPool>, Json(req): Json<AuthRequest>) -> Response<Body> {
     match async {
         // check if the user already exists
         if query_scalar!(
             "SELECT 1::int FROM users WHERE username = $1",
             &req.username
         )
-            .fetch_optional(&pool)
-            .await
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-            .is_some() {
-                return Err(StatusCode::UNAUTHORIZED);
-            }
+        .fetch_optional(&pool)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .is_some()
+        {
+            return Err(StatusCode::UNAUTHORIZED);
+        }
 
         // salt n hash
         let password = ARGON2
@@ -91,30 +83,30 @@ pub async fn signup(
             .body(Body::from("User created"))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
     }
-    .await {
+    .await
+    {
         Ok(resp) => resp,
         Err(status) => status_response(status),
     }
 }
 
 // still a big ass bottleneck in verification. we at 80 ms now with mild insecurity.
-pub async fn login(
-    State(pool): State<PgPool>,
-    Json(req): Json<AuthRequest>,
-) -> Response<Body> {
+pub async fn login(State(pool): State<PgPool>, Json(req): Json<AuthRequest>) -> Response<Body> {
     match async {
         let hash: String = query_scalar!(
             "SELECT password FROM users WHERE username = $1",
             &req.username
         )
-            .fetch_one(&pool)
-            .await
-            .map_err(|_| StatusCode::UNAUTHORIZED)?;
+        .fetch_one(&pool)
+        .await
+        .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
-        ARGON2.verify_password(
-            req.password.as_bytes(),
-            &PasswordHash::new(&hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
-        ).map_err(|_| StatusCode::UNAUTHORIZED)?;
+        ARGON2
+            .verify_password(
+                req.password.as_bytes(),
+                &PasswordHash::new(&hash).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            )
+            .map_err(|_| StatusCode::UNAUTHORIZED)?;
 
         // create jwt
         let now = Utc::now().timestamp() as usize;
@@ -127,7 +119,8 @@ pub async fn login(
                 exp: now + 86400,
             },
             &EncodingKey::from_secret(&JWT_SECRET),
-        ).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        )
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
         // token will drop if i don't clone dat jawn
         let token_for_db = jwt.clone();
@@ -141,7 +134,8 @@ pub async fn login(
                 now as i64
             )
             .execute(&pool_clone)
-            .await {
+            .await
+            {
                 eprintln!("session insert failed: {e}");
             }
         });
@@ -151,17 +145,16 @@ pub async fn login(
             .header("Content-Type", "application/json")
             .body(Body::from(jwt))
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?)
-    }.await {
+    }
+    .await
+    {
         Ok(resp) => resp,
         Err(status) => status_response(status),
     }
 }
 
 // TODO: check db for session so sessions aren't useless
-pub async fn verify(
-    pool: &PgPool,
-    headers: &HeaderMap
-) -> Result<(), StatusCode> {
+pub async fn verify(pool: &PgPool, headers: &HeaderMap) -> Result<(), StatusCode> {
     // decode header
     let token = headers
         .get("authorization")
@@ -175,7 +168,8 @@ pub async fn verify(
         &token,
         &DecodingKey::from_secret(&JWT_SECRET),
         &Validation::default(),
-    ).map_err(|e| {
+    )
+    .map_err(|e| {
         eprintln!("JWT decode failed: {:?}", e);
         StatusCode::UNPROCESSABLE_ENTITY
     })?;
